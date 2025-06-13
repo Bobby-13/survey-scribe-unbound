@@ -7,7 +7,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { useNavigate } from 'react-router-dom';
 
 interface BranchingRule {
@@ -61,6 +61,7 @@ const SurveyBuilder = () => {
   const [selectedQuestionType, setSelectedQuestionType] = useState<Question['type']>('text');
   const [selectedSectionId, setSelectedSectionId] = useState('default');
   const [newQuestionDialogOpen, setNewQuestionDialogOpen] = useState(false);
+  const [previewDialogOpen, setPreviewDialogOpen] = useState(false);
   const [currentBranchingContext, setCurrentBranchingContext] = useState<{
     questionId: string;
     ruleId: string;
@@ -185,7 +186,7 @@ const SurveyBuilder = () => {
       options: ['multiple_choice', 'checkbox', 'dropdown'].includes(newQuestionForm.type) 
         ? newQuestionForm.options.filter(opt => opt.trim() !== '')
         : undefined,
-      branchingRules: [],
+      branchingRules: [], // Initialize with empty branching rules
       parentQuestionId: currentBranchingContext.questionId,
       branchingLevel
     };
@@ -205,6 +206,8 @@ const SurveyBuilder = () => {
     setNewQuestionDialogOpen(false);
     setCurrentBranchingContext(null);
     resetNewQuestionForm();
+
+    console.log('Created new branched question:', newQuestion);
   };
 
   const resetNewQuestionForm = () => {
@@ -815,6 +818,108 @@ const SurveyBuilder = () => {
     );
   };
 
+  const renderSurveyPreview = () => {
+    return (
+      <div className="space-y-6">
+        <div className="text-center">
+          <h2 className="text-2xl font-bold text-gray-900">{surveyTitle || 'Untitled Survey'}</h2>
+          {surveyDescription && (
+            <p className="text-gray-600 mt-2">{surveyDescription}</p>
+          )}
+        </div>
+
+        {sections.map(section => {
+          const sectionQuestions = getQuestionsForSection(section.id);
+          if (sectionQuestions.length === 0) return null;
+
+          return (
+            <div key={section.id} className="border rounded-lg p-4">
+              <h3 className="text-lg font-semibold text-purple-700 mb-4">{section.title}</h3>
+              {section.description && (
+                <p className="text-gray-600 mb-4">{section.description}</p>
+              )}
+              
+              <div className="space-y-4">
+                {sectionQuestions.map(question => (
+                  <div key={question.id} className={`p-4 border rounded ${question.branchingLevel ? 'ml-' + (question.branchingLevel * 4) + ' border-l-4 border-l-purple-400' : ''}`}>
+                    <div className="mb-2">
+                      <span className="text-sm font-medium text-gray-900">
+                        {question.title} {question.required && <span className="text-red-500">*</span>}
+                      </span>
+                      {question.description && (
+                        <p className="text-sm text-gray-600 mt-1">{question.description}</p>
+                      )}
+                    </div>
+                    
+                    {question.type === 'text' && (
+                      <input type="text" className="w-full p-2 border rounded" placeholder="Your answer..." disabled />
+                    )}
+                    
+                    {question.type === 'textarea' && (
+                      <textarea className="w-full p-2 border rounded" rows={3} placeholder="Your answer..." disabled />
+                    )}
+                    
+                    {question.type === 'multiple_choice' && question.options && (
+                      <div className="space-y-2">
+                        {question.options.map((option, idx) => (
+                          <label key={idx} className="flex items-center space-x-2">
+                            <input type="radio" name={question.id} disabled />
+                            <span>{option}</span>
+                          </label>
+                        ))}
+                      </div>
+                    )}
+                    
+                    {question.type === 'checkbox' && question.options && (
+                      <div className="space-y-2">
+                        {question.options.map((option, idx) => (
+                          <label key={idx} className="flex items-center space-x-2">
+                            <input type="checkbox" disabled />
+                            <span>{option}</span>
+                          </label>
+                        ))}
+                      </div>
+                    )}
+                    
+                    {question.type === 'dropdown' && question.options && (
+                      <select className="w-full p-2 border rounded" disabled>
+                        <option>Select an option...</option>
+                        {question.options.map((option, idx) => (
+                          <option key={idx}>{option}</option>
+                        ))}
+                      </select>
+                    )}
+                    
+                    {question.type === 'rating' && (
+                      <div className="flex space-x-2">
+                        {[1, 2, 3, 4, 5].map(num => (
+                          <button key={num} className="w-8 h-8 border rounded-full hover:bg-blue-100 transition-colors" disabled>
+                            {num}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                    
+                    {question.type === 'date' && (
+                      <input type="date" className="p-2 border rounded" disabled />
+                    )}
+
+                    {question.branchingRules && question.branchingRules.length > 0 && (
+                      <div className="mt-2 text-xs text-blue-600">
+                        <GitBranch className="w-3 h-3 inline mr-1" />
+                        Has branching logic ({question.branchingRules.length} rules)
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    );
+  };
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-purple-50">
       {/* Header */}
@@ -832,7 +937,7 @@ const SurveyBuilder = () => {
               </div>
             </div>
             <div className="flex items-center space-x-3">
-              <Button variant="outline">
+              <Button variant="outline" onClick={() => setPreviewDialogOpen(true)}>
                 <Eye className="w-4 h-4 mr-2" />
                 Preview
               </Button>
@@ -988,11 +1093,29 @@ const SurveyBuilder = () => {
         </div>
       </div>
 
+      {/* Survey Preview Dialog */}
+      <Dialog open={previewDialogOpen} onOpenChange={setPreviewDialogOpen}>
+        <DialogContent className="max-w-4xl max-h-[80vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Survey Preview</DialogTitle>
+            <DialogDescription>
+              This is how your survey will appear to respondents.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="mt-4">
+            {renderSurveyPreview()}
+          </div>
+        </DialogContent>
+      </Dialog>
+
       {/* Enhanced New Question Dialog for Branching */}
       <Dialog open={newQuestionDialogOpen} onOpenChange={setNewQuestionDialogOpen}>
         <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Create New Branched Question</DialogTitle>
+            <DialogDescription>
+              Create a new question that will be shown based on the branching condition.
+            </DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
             <div>
@@ -1113,7 +1236,7 @@ const SurveyBuilder = () => {
                 <label className="text-sm font-medium text-gray-700 mb-2 block">Preview:</label>
                 <div className="flex space-x-2">
                   {[1, 2, 3, 4, 5].map(num => (
-                    <button key={num} className="w-8 h-8 border rounded-full hover:bg-blue-100 transition-colors">
+                    <button key={num} className="w-8 h-8 border rounded-full hover:bg-blue-100 transition-colors" disabled>
                       {num}
                     </button>
                   ))}
