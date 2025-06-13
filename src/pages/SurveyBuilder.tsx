@@ -7,6 +7,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { useNavigate } from 'react-router-dom';
 
 interface BranchingRule {
@@ -15,7 +16,8 @@ interface BranchingRule {
   value: string | number;
   targetQuestionId?: string;
   targetSectionId?: string;
-  action: 'show_question' | 'show_section' | 'skip_to' | 'end_survey';
+  action: 'show_question' | 'show_section' | 'skip_to' | 'end_survey' | 'create_question';
+  newQuestionData?: Partial<Question>; // For storing new question details
 }
 
 interface Question {
@@ -27,6 +29,8 @@ interface Question {
   options?: string[];
   sectionId: string;
   branchingRules?: BranchingRule[];
+  parentQuestionId?: string; // Track which question this branched from
+  branchingLevel?: number; // Track nesting level for UI
 }
 
 interface Section {
@@ -47,6 +51,11 @@ const SurveyBuilder = () => {
   const [questions, setQuestions] = useState<Question[]>([]);
   const [selectedQuestionType, setSelectedQuestionType] = useState<Question['type']>('text');
   const [selectedSectionId, setSelectedSectionId] = useState('default');
+  const [newQuestionDialogOpen, setNewQuestionDialogOpen] = useState(false);
+  const [currentBranchingContext, setCurrentBranchingContext] = useState<{
+    questionId: string;
+    ruleId: string;
+  } | null>(null);
 
   const questionTypes = [
     { value: 'text', label: 'Text Input' },
@@ -68,7 +77,8 @@ const SurveyBuilder = () => {
   ];
 
   const branchingActions = [
-    { value: 'show_question', label: 'Show Question' },
+    { value: 'show_question', label: 'Show Existing Question' },
+    { value: 'create_question', label: 'Create New Question' },
     { value: 'show_section', label: 'Show Section' },
     { value: 'skip_to', label: 'Skip To' },
     { value: 'end_survey', label: 'End Survey' }
@@ -104,19 +114,41 @@ const SurveyBuilder = () => {
     ));
   };
 
-  const addQuestion = () => {
+  const addQuestion = (branchingContext?: { questionId: string; ruleId: string }) => {
+    const parentQuestion = branchingContext ? questions.find(q => q.id === branchingContext.questionId) : null;
+    const branchingLevel = parentQuestion ? (parentQuestion.branchingLevel || 0) + 1 : 0;
+    
     const newQuestion: Question = {
       id: Date.now().toString(),
       type: selectedQuestionType,
-      title: 'New Question',
+      title: branchingContext ? 'New Branched Question' : 'New Question',
       required: false,
       sectionId: selectedSectionId,
       options: ['multiple_choice', 'checkbox', 'dropdown'].includes(selectedQuestionType) 
         ? ['Option 1', 'Option 2'] 
         : undefined,
-      branchingRules: []
+      branchingRules: [],
+      parentQuestionId: branchingContext?.questionId,
+      branchingLevel
     };
+    
     setQuestions([...questions, newQuestion]);
+
+    // If this was created from branching, update the rule
+    if (branchingContext) {
+      updateBranchingRule(
+        branchingContext.questionId, 
+        branchingContext.ruleId, 
+        { 
+          targetQuestionId: newQuestion.id,
+          newQuestionData: newQuestion
+        }
+      );
+      setNewQuestionDialogOpen(false);
+      setCurrentBranchingContext(null);
+    }
+
+    return newQuestion.id;
   };
 
   const updateQuestion = (id: string, updates: Partial<Question>) => {
@@ -124,7 +156,14 @@ const SurveyBuilder = () => {
   };
 
   const deleteQuestion = (id: string) => {
-    setQuestions(questions.filter(q => q.id !== id));
+    // Also remove any branching rules that target this question
+    const updatedQuestions = questions
+      .filter(q => q.id !== id)
+      .map(q => ({
+        ...q,
+        branchingRules: q.branchingRules?.filter(rule => rule.targetQuestionId !== id)
+      }));
+    setQuestions(updatedQuestions);
   };
 
   const addBranchingRule = (questionId: string) => {
@@ -155,9 +194,26 @@ const SurveyBuilder = () => {
   const deleteBranchingRule = (questionId: string, ruleId: string) => {
     const question = questions.find(q => q.id === questionId);
     if (question && question.branchingRules) {
+      const ruleToDelete = question.branchingRules.find(rule => rule.id === ruleId);
+      
+      // If the rule created a question, ask if they want to delete that too
+      if (ruleToDelete && ruleToDelete.targetQuestionId && ruleToDelete.action === 'create_question') {
+        const shouldDeleteTargetQuestion = window.confirm(
+          'This rule created a new question. Do you want to delete that question too?'
+        );
+        if (shouldDeleteTargetQuestion) {
+          deleteQuestion(ruleToDelete.targetQuestionId);
+        }
+      }
+
       const updatedRules = question.branchingRules.filter(rule => rule.id !== ruleId);
       updateQuestion(questionId, { branchingRules: updatedRules });
     }
+  };
+
+  const handleCreateNewQuestionFromBranching = (questionId: string, ruleId: string) => {
+    setCurrentBranchingContext({ questionId, ruleId });
+    setNewQuestionDialogOpen(true);
   };
 
   const addOption = (questionId: string) => {
@@ -197,7 +253,9 @@ const SurveyBuilder = () => {
   };
 
   const getQuestionsForSection = (sectionId: string) => {
-    return questions.filter(q => q.sectionId === sectionId);
+    return questions
+      .filter(q => q.sectionId === sectionId)
+      .sort((a, b) => (a.branchingLevel || 0) - (b.branchingLevel || 0)); // Sort by branching level
   };
 
   const getAvailableTargets = (currentQuestionId: string) => {
@@ -206,6 +264,78 @@ const SurveyBuilder = () => {
       questions: allQuestions,
       sections: sections
     };
+  };
+
+  const renderBranchingRuleTargetSelector = (question: Question, rule: BranchingRule) => {
+    if (rule.action === 'create_question') {
+      return (
+        <div>
+          <label className="text-xs font-medium text-gray-600">New Question</label>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => handleCreateNewQuestionFromBranching(question.id, rule.id)}
+            className="w-full h-8 text-blue-600 border-blue-300"
+          >
+            <Plus className="w-3 h-3 mr-1" />
+            Create Question
+          </Button>
+          {rule.targetQuestionId && (
+            <div className="mt-1 text-xs text-green-600">
+              ✓ Question created: {questions.find(q => q.id === rule.targetQuestionId)?.title}
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    if (rule.action === 'show_question' || rule.action === 'skip_to') {
+      return (
+        <div>
+          <label className="text-xs font-medium text-gray-600">Target Question</label>
+          <Select
+            value={rule.targetQuestionId || ''}
+            onValueChange={(value) => updateBranchingRule(question.id, rule.id, { targetQuestionId: value })}
+          >
+            <SelectTrigger className="h-8">
+              <SelectValue placeholder="Select question" />
+            </SelectTrigger>
+            <SelectContent>
+              {getAvailableTargets(question.id).questions.map(q => (
+                <SelectItem key={q.id} value={q.id}>
+                  {q.title} {q.branchingLevel ? `(Level ${q.branchingLevel})` : ''}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+      );
+    }
+
+    if (rule.action === 'show_section') {
+      return (
+        <div>
+          <label className="text-xs font-medium text-gray-600">Target Section</label>
+          <Select
+            value={rule.targetSectionId || ''}
+            onValueChange={(value) => updateBranchingRule(question.id, rule.id, { targetSectionId: value })}
+          >
+            <SelectTrigger className="h-8">
+              <SelectValue placeholder="Select section" />
+            </SelectTrigger>
+            <SelectContent>
+              {sections.map(s => (
+                <SelectItem key={s.id} value={s.id}>
+                  {s.title}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+      );
+    }
+
+    return null;
   };
 
   const renderBranchingRules = (question: Question) => {
@@ -219,6 +349,11 @@ const SurveyBuilder = () => {
           <div className="flex items-center space-x-2">
             <GitBranch className="w-4 h-4 text-blue-600" />
             <h4 className="font-medium text-blue-900">Branching Logic</h4>
+            {question.branchingLevel && question.branchingLevel > 0 && (
+              <Badge variant="secondary" className="bg-purple-100 text-purple-700">
+                Level {question.branchingLevel}
+              </Badge>
+            )}
           </div>
           <Button
             variant="outline"
@@ -256,12 +391,30 @@ const SurveyBuilder = () => {
 
                 <div>
                   <label className="text-xs font-medium text-gray-600">Value</label>
-                  <Input
-                    value={rule.value.toString()}
-                    onChange={(e) => updateBranchingRule(question.id, rule.id, { value: e.target.value })}
-                    placeholder="Enter value"
-                    className="h-8"
-                  />
+                  {question.type === 'multiple_choice' && question.options ? (
+                    <Select
+                      value={rule.value.toString()}
+                      onValueChange={(value) => updateBranchingRule(question.id, rule.id, { value })}
+                    >
+                      <SelectTrigger className="h-8">
+                        <SelectValue placeholder="Select option" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {question.options.map((option, idx) => (
+                          <SelectItem key={idx} value={option}>
+                            {option}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  ) : (
+                    <Input
+                      value={rule.value.toString()}
+                      onChange={(e) => updateBranchingRule(question.id, rule.id, { value: e.target.value })}
+                      placeholder="Enter value"
+                      className="h-8"
+                    />
+                  )}
                 </div>
               </div>
 
@@ -285,47 +438,7 @@ const SurveyBuilder = () => {
                   </Select>
                 </div>
 
-                {(rule.action === 'show_question' || rule.action === 'skip_to') && (
-                  <div>
-                    <label className="text-xs font-medium text-gray-600">Target Question</label>
-                    <Select
-                      value={rule.targetQuestionId || ''}
-                      onValueChange={(value) => updateBranchingRule(question.id, rule.id, { targetQuestionId: value })}
-                    >
-                      <SelectTrigger className="h-8">
-                        <SelectValue placeholder="Select question" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {getAvailableTargets(question.id).questions.map(q => (
-                          <SelectItem key={q.id} value={q.id}>
-                            {q.title}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                )}
-
-                {rule.action === 'show_section' && (
-                  <div>
-                    <label className="text-xs font-medium text-gray-600">Target Section</label>
-                    <Select
-                      value={rule.targetSectionId || ''}
-                      onValueChange={(value) => updateBranchingRule(question.id, rule.id, { targetSectionId: value })}
-                    >
-                      <SelectTrigger className="h-8">
-                        <SelectValue placeholder="Select section" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {sections.map(s => (
-                          <SelectItem key={s.id} value={s.id}>
-                            {s.title}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                )}
+                {renderBranchingRuleTargetSelector(question, rule)}
               </div>
 
               <div className="flex justify-end mt-2">
@@ -346,13 +459,27 @@ const SurveyBuilder = () => {
   };
 
   const renderQuestionEditor = (question: Question) => {
+    const indentLevel = question.branchingLevel || 0;
+    const marginLeft = indentLevel * 20;
+
     return (
-      <Card key={question.id} className="mb-4 border-2 hover:border-blue-300 transition-colors">
+      <Card 
+        key={question.id} 
+        className={`mb-4 border-2 hover:border-blue-300 transition-colors ${
+          indentLevel > 0 ? 'border-l-4 border-l-purple-400' : ''
+        }`}
+        style={{ marginLeft: `${marginLeft}px` }}
+      >
         <CardHeader className="pb-3">
           <div className="flex items-center justify-between">
             <div className="flex items-center space-x-2">
               <GripVertical className="w-4 h-4 text-gray-400 cursor-move" />
               <Badge variant="outline">{questionTypes.find(t => t.value === question.type)?.label}</Badge>
+              {question.branchingLevel && question.branchingLevel > 0 && (
+                <Badge variant="secondary" className="bg-purple-100 text-purple-700">
+                  Branched (L{question.branchingLevel})
+                </Badge>
+              )}
               {question.branchingRules && question.branchingRules.length > 0 && (
                 <Badge variant="secondary" className="bg-blue-100 text-blue-700">
                   <GitBranch className="w-3 h-3 mr-1" />
@@ -570,8 +697,8 @@ const SurveyBuilder = () => {
                   
                   {sectionQuestions.length === 0 && (
                     <div className="text-center py-8 text-gray-500 border-2 border-dashed border-gray-300 rounded-lg">
-                      <p>No questions in this section</p>
-                      <p className="text-sm">Select this section from the sidebar to add questions</p>
+                      <p className="text-gray-500 mb-4">No questions in this section</p>
+                      <p className="text-sm text-gray-400">Click "Add Question" to organize your questions</p>
                     </div>
                   )}
                 </div>
@@ -714,7 +841,7 @@ const SurveyBuilder = () => {
                 </div>
                 
                 <Button 
-                  onClick={addQuestion} 
+                  onClick={() => addQuestion()} 
                   className="w-full bg-gradient-to-r from-blue-600 to-purple-600 text-white"
                 >
                   <Plus className="w-4 h-4 mr-2" />
@@ -741,6 +868,10 @@ const SurveyBuilder = () => {
                       <span className="font-medium">{questions.filter(q => q.branchingRules && q.branchingRules.length > 0).length}</span>
                     </div>
                     <div className="flex justify-between">
+                      <span className="text-gray-600">Branched Questions:</span>
+                      <span className="font-medium">{questions.filter(q => q.parentQuestionId).length}</span>
+                    </div>
+                    <div className="flex justify-between">
                       <span className="text-gray-600">Estimated time:</span>
                       <span className="font-medium">{Math.max(1, Math.ceil(questions.length * 0.5))} min</span>
                     </div>
@@ -751,6 +882,66 @@ const SurveyBuilder = () => {
           </div>
         </div>
       </div>
+
+      {/* New Question Dialog for Branching */}
+      <Dialog open={newQuestionDialogOpen} onOpenChange={setNewQuestionDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Create New Branched Question</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div>
+              <label className="text-sm font-medium text-gray-700 mb-2 block">Question Type</label>
+              <Select value={selectedQuestionType} onValueChange={handleSelectedQuestionTypeChange}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {questionTypes.map(type => (
+                    <SelectItem key={type.value} value={type.value}>
+                      {type.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            
+            <div>
+              <label className="text-sm font-medium text-gray-700 mb-2 block">Section</label>
+              <Select value={selectedSectionId} onValueChange={setSelectedSectionId}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {sections.map(section => (
+                    <SelectItem key={section.id} value={section.id}>
+                      {section.title}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="flex justify-end space-x-2">
+              <Button 
+                variant="outline" 
+                onClick={() => {
+                  setNewQuestionDialogOpen(false);
+                  setCurrentBranchingContext(null);
+                }}
+              >
+                Cancel
+              </Button>
+              <Button 
+                onClick={() => currentBranchingContext && addQuestion(currentBranchingContext)}
+                className="bg-gradient-to-r from-blue-600 to-purple-600 text-white"
+              >
+                Create Question
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };
