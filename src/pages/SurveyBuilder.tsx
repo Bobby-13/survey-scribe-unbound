@@ -41,6 +41,15 @@ interface Section {
   isCollapsed?: boolean;
 }
 
+interface NewQuestionForm {
+  title: string;
+  description: string;
+  type: Question['type'];
+  required: boolean;
+  sectionId: string;
+  options: string[];
+}
+
 const SurveyBuilder = () => {
   const navigate = useNavigate();
   const [surveyTitle, setSurveyTitle] = useState('');
@@ -56,6 +65,14 @@ const SurveyBuilder = () => {
     questionId: string;
     ruleId: string;
   } | null>(null);
+  const [newQuestionForm, setNewQuestionForm] = useState<NewQuestionForm>({
+    title: '',
+    description: '',
+    type: 'text',
+    required: false,
+    sectionId: 'default',
+    options: ['Option 1', 'Option 2']
+  });
 
   const questionTypes = [
     { value: 'text', label: 'Text Input' },
@@ -146,9 +163,81 @@ const SurveyBuilder = () => {
       );
       setNewQuestionDialogOpen(false);
       setCurrentBranchingContext(null);
+      resetNewQuestionForm();
     }
 
     return newQuestion.id;
+  };
+
+  const createQuestionFromForm = () => {
+    if (!currentBranchingContext) return;
+
+    const parentQuestion = questions.find(q => q.id === currentBranchingContext.questionId);
+    const branchingLevel = parentQuestion ? (parentQuestion.branchingLevel || 0) + 1 : 0;
+    
+    const newQuestion: Question = {
+      id: Date.now().toString(),
+      type: newQuestionForm.type,
+      title: newQuestionForm.title || 'New Branched Question',
+      description: newQuestionForm.description,
+      required: newQuestionForm.required,
+      sectionId: newQuestionForm.sectionId,
+      options: ['multiple_choice', 'checkbox', 'dropdown'].includes(newQuestionForm.type) 
+        ? newQuestionForm.options.filter(opt => opt.trim() !== '')
+        : undefined,
+      branchingRules: [],
+      parentQuestionId: currentBranchingContext.questionId,
+      branchingLevel
+    };
+    
+    setQuestions([...questions, newQuestion]);
+
+    // Update the branching rule
+    updateBranchingRule(
+      currentBranchingContext.questionId, 
+      currentBranchingContext.ruleId, 
+      { 
+        targetQuestionId: newQuestion.id,
+        newQuestionData: newQuestion
+      }
+    );
+
+    setNewQuestionDialogOpen(false);
+    setCurrentBranchingContext(null);
+    resetNewQuestionForm();
+  };
+
+  const resetNewQuestionForm = () => {
+    setNewQuestionForm({
+      title: '',
+      description: '',
+      type: 'text',
+      required: false,
+      sectionId: 'default',
+      options: ['Option 1', 'Option 2']
+    });
+  };
+
+  const updateNewQuestionForm = (updates: Partial<NewQuestionForm>) => {
+    setNewQuestionForm(prev => ({ ...prev, ...updates }));
+  };
+
+  const addOptionToNewQuestion = () => {
+    const newOptions = [...newQuestionForm.options, `Option ${newQuestionForm.options.length + 1}`];
+    updateNewQuestionForm({ options: newOptions });
+  };
+
+  const updateNewQuestionOption = (index: number, value: string) => {
+    const newOptions = [...newQuestionForm.options];
+    newOptions[index] = value;
+    updateNewQuestionForm({ options: newOptions });
+  };
+
+  const removeNewQuestionOption = (index: number) => {
+    if (newQuestionForm.options.length > 1) {
+      const newOptions = newQuestionForm.options.filter((_, i) => i !== index);
+      updateNewQuestionForm({ options: newOptions });
+    }
   };
 
   const updateQuestion = (id: string, updates: Partial<Question>) => {
@@ -213,6 +302,13 @@ const SurveyBuilder = () => {
 
   const handleCreateNewQuestionFromBranching = (questionId: string, ruleId: string) => {
     setCurrentBranchingContext({ questionId, ruleId });
+    
+    // Set default section to same as parent question
+    const parentQuestion = questions.find(q => q.id === questionId);
+    if (parentQuestion) {
+      updateNewQuestionForm({ sectionId: parentQuestion.sectionId });
+    }
+    
     setNewQuestionDialogOpen(true);
   };
 
@@ -244,7 +340,16 @@ const SurveyBuilder = () => {
 
   const handleQuestionTypeChange = (questionId: string, value: string) => {
     const questionType = value as Question['type'];
-    updateQuestion(questionId, { type: questionType });
+    const updates: Partial<Question> = { type: questionType };
+    
+    // Add default options for option-based question types
+    if (['multiple_choice', 'checkbox', 'dropdown'].includes(questionType)) {
+      updates.options = ['Option 1', 'Option 2'];
+    } else {
+      updates.options = undefined;
+    }
+    
+    updateQuestion(questionId, updates);
   };
 
   const handleSelectedQuestionTypeChange = (value: string) => {
@@ -883,59 +988,156 @@ const SurveyBuilder = () => {
         </div>
       </div>
 
-      {/* New Question Dialog for Branching */}
+      {/* Enhanced New Question Dialog for Branching */}
       <Dialog open={newQuestionDialogOpen} onOpenChange={setNewQuestionDialogOpen}>
-        <DialogContent>
+        <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Create New Branched Question</DialogTitle>
           </DialogHeader>
           <div className="space-y-4">
             <div>
-              <label className="text-sm font-medium text-gray-700 mb-2 block">Question Type</label>
-              <Select value={selectedQuestionType} onValueChange={handleSelectedQuestionTypeChange}>
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {questionTypes.map(type => (
-                    <SelectItem key={type.value} value={type.value}>
-                      {type.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            
-            <div>
-              <label className="text-sm font-medium text-gray-700 mb-2 block">Section</label>
-              <Select value={selectedSectionId} onValueChange={setSelectedSectionId}>
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {sections.map(section => (
-                    <SelectItem key={section.id} value={section.id}>
-                      {section.title}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <label className="text-sm font-medium text-gray-700 mb-2 block">Question Title *</label>
+              <Input
+                value={newQuestionForm.title}
+                onChange={(e) => updateNewQuestionForm({ title: e.target.value })}
+                placeholder="Enter question title"
+              />
             </div>
 
-            <div className="flex justify-end space-x-2">
+            <div>
+              <label className="text-sm font-medium text-gray-700 mb-2 block">Question Description</label>
+              <Textarea
+                value={newQuestionForm.description}
+                onChange={(e) => updateNewQuestionForm({ description: e.target.value })}
+                placeholder="Optional description for the question"
+                rows={2}
+              />
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="text-sm font-medium text-gray-700 mb-2 block">Question Type</label>
+                <Select 
+                  value={newQuestionForm.type} 
+                  onValueChange={(value: Question['type']) => {
+                    const updates: Partial<NewQuestionForm> = { type: value };
+                    if (['multiple_choice', 'checkbox', 'dropdown'].includes(value)) {
+                      updates.options = ['Option 1', 'Option 2'];
+                    }
+                    updateNewQuestionForm(updates);
+                  }}
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {questionTypes.map(type => (
+                      <SelectItem key={type.value} value={type.value}>
+                        {type.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              
+              <div>
+                <label className="text-sm font-medium text-gray-700 mb-2 block">Section</label>
+                <Select 
+                  value={newQuestionForm.sectionId} 
+                  onValueChange={(value) => updateNewQuestionForm({ sectionId: value })}
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {sections.map(section => (
+                      <SelectItem key={section.id} value={section.id}>
+                        {section.title}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+
+            <div className="flex items-center space-x-2">
+              <input
+                type="checkbox"
+                id="required"
+                checked={newQuestionForm.required}
+                onChange={(e) => updateNewQuestionForm({ required: e.target.checked })}
+                className="rounded"
+              />
+              <label htmlFor="required" className="text-sm font-medium text-gray-700">
+                Required question
+              </label>
+            </div>
+
+            {/* Options for multiple choice, checkbox, dropdown */}
+            {['multiple_choice', 'checkbox', 'dropdown'].includes(newQuestionForm.type) && (
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <label className="text-sm font-medium text-gray-700">Answer Options:</label>
+                  <Button 
+                    variant="outline" 
+                    size="sm" 
+                    onClick={addOptionToNewQuestion}
+                  >
+                    <Plus className="w-4 h-4 mr-1" />
+                    Add Option
+                  </Button>
+                </div>
+                {newQuestionForm.options.map((option, index) => (
+                  <div key={index} className="flex items-center space-x-2">
+                    <Input
+                      value={option}
+                      onChange={(e) => updateNewQuestionOption(index, e.target.value)}
+                      placeholder={`Option ${index + 1}`}
+                    />
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => removeNewQuestionOption(index)}
+                      disabled={newQuestionForm.options.length <= 1}
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Rating scale preview */}
+            {newQuestionForm.type === 'rating' && (
+              <div className="p-4 bg-gray-50 rounded-lg">
+                <label className="text-sm font-medium text-gray-700 mb-2 block">Preview:</label>
+                <div className="flex space-x-2">
+                  {[1, 2, 3, 4, 5].map(num => (
+                    <button key={num} className="w-8 h-8 border rounded-full hover:bg-blue-100 transition-colors">
+                      {num}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            <div className="flex justify-end space-x-2 pt-4">
               <Button 
                 variant="outline" 
                 onClick={() => {
                   setNewQuestionDialogOpen(false);
                   setCurrentBranchingContext(null);
+                  resetNewQuestionForm();
                 }}
               >
                 Cancel
               </Button>
               <Button 
-                onClick={() => currentBranchingContext && addQuestion(currentBranchingContext)}
+                onClick={createQuestionFromForm}
+                disabled={!newQuestionForm.title.trim()}
                 className="bg-gradient-to-r from-blue-600 to-purple-600 text-white"
               >
+                <Plus className="w-4 h-4 mr-2" />
                 Create Question
               </Button>
             </div>
