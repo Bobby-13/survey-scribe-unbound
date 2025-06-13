@@ -1,13 +1,22 @@
-
 import React, { useState } from 'react';
-import { ArrowLeft, Plus, Trash2, GripVertical, Eye, Save, Settings } from 'lucide-react';
+import { ArrowLeft, Plus, Trash2, GripVertical, Eye, Save, Settings, ChevronDown, ChevronRight, GitBranch } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { useNavigate } from 'react-router-dom';
+
+interface BranchingRule {
+  id: string;
+  condition: 'equals' | 'not_equals' | 'greater_than' | 'less_than' | 'contains' | 'selected';
+  value: string | number;
+  targetQuestionId?: string;
+  targetSectionId?: string;
+  action: 'show_question' | 'show_section' | 'skip_to' | 'end_survey';
+}
 
 interface Question {
   id: string;
@@ -16,14 +25,28 @@ interface Question {
   description?: string;
   required: boolean;
   options?: string[];
+  sectionId: string;
+  branchingRules?: BranchingRule[];
+}
+
+interface Section {
+  id: string;
+  title: string;
+  description?: string;
+  orderIndex: number;
+  isCollapsed?: boolean;
 }
 
 const SurveyBuilder = () => {
   const navigate = useNavigate();
   const [surveyTitle, setSurveyTitle] = useState('');
   const [surveyDescription, setSurveyDescription] = useState('');
+  const [sections, setSections] = useState<Section[]>([
+    { id: 'default', title: 'General Questions', orderIndex: 0, isCollapsed: false }
+  ]);
   const [questions, setQuestions] = useState<Question[]>([]);
   const [selectedQuestionType, setSelectedQuestionType] = useState<Question['type']>('text');
+  const [selectedSectionId, setSelectedSectionId] = useState('default');
 
   const questionTypes = [
     { value: 'text', label: 'Text Input' },
@@ -35,15 +58,63 @@ const SurveyBuilder = () => {
     { value: 'date', label: 'Date Picker' }
   ];
 
+  const branchingConditions = [
+    { value: 'equals', label: 'Equals' },
+    { value: 'not_equals', label: 'Not Equals' },
+    { value: 'greater_than', label: 'Greater Than' },
+    { value: 'less_than', label: 'Less Than' },
+    { value: 'contains', label: 'Contains' },
+    { value: 'selected', label: 'Option Selected' }
+  ];
+
+  const branchingActions = [
+    { value: 'show_question', label: 'Show Question' },
+    { value: 'show_section', label: 'Show Section' },
+    { value: 'skip_to', label: 'Skip To' },
+    { value: 'end_survey', label: 'End Survey' }
+  ];
+
+  const addSection = () => {
+    const newSection: Section = {
+      id: Date.now().toString(),
+      title: 'New Section',
+      orderIndex: sections.length,
+      isCollapsed: false
+    };
+    setSections([...sections, newSection]);
+  };
+
+  const updateSection = (id: string, updates: Partial<Section>) => {
+    setSections(sections.map(s => s.id === id ? { ...s, ...updates } : s));
+  };
+
+  const deleteSection = (id: string) => {
+    if (id === 'default') return; // Don't allow deleting default section
+    
+    // Move questions from deleted section to default
+    setQuestions(questions.map(q => 
+      q.sectionId === id ? { ...q, sectionId: 'default' } : q
+    ));
+    setSections(sections.filter(s => s.id !== id));
+  };
+
+  const toggleSectionCollapse = (id: string) => {
+    setSections(sections.map(s => 
+      s.id === id ? { ...s, isCollapsed: !s.isCollapsed } : s
+    ));
+  };
+
   const addQuestion = () => {
     const newQuestion: Question = {
       id: Date.now().toString(),
       type: selectedQuestionType,
       title: 'New Question',
       required: false,
+      sectionId: selectedSectionId,
       options: ['multiple_choice', 'checkbox', 'dropdown'].includes(selectedQuestionType) 
         ? ['Option 1', 'Option 2'] 
-        : undefined
+        : undefined,
+      branchingRules: []
     };
     setQuestions([...questions, newQuestion]);
   };
@@ -54,6 +125,39 @@ const SurveyBuilder = () => {
 
   const deleteQuestion = (id: string) => {
     setQuestions(questions.filter(q => q.id !== id));
+  };
+
+  const addBranchingRule = (questionId: string) => {
+    const newRule: BranchingRule = {
+      id: Date.now().toString(),
+      condition: 'equals',
+      value: '',
+      action: 'show_question'
+    };
+    
+    const question = questions.find(q => q.id === questionId);
+    if (question) {
+      const updatedRules = [...(question.branchingRules || []), newRule];
+      updateQuestion(questionId, { branchingRules: updatedRules });
+    }
+  };
+
+  const updateBranchingRule = (questionId: string, ruleId: string, updates: Partial<BranchingRule>) => {
+    const question = questions.find(q => q.id === questionId);
+    if (question && question.branchingRules) {
+      const updatedRules = question.branchingRules.map(rule =>
+        rule.id === ruleId ? { ...rule, ...updates } : rule
+      );
+      updateQuestion(questionId, { branchingRules: updatedRules });
+    }
+  };
+
+  const deleteBranchingRule = (questionId: string, ruleId: string) => {
+    const question = questions.find(q => q.id === questionId);
+    if (question && question.branchingRules) {
+      const updatedRules = question.branchingRules.filter(rule => rule.id !== ruleId);
+      updateQuestion(questionId, { branchingRules: updatedRules });
+    }
   };
 
   const addOption = (questionId: string) => {
@@ -92,6 +196,155 @@ const SurveyBuilder = () => {
     setSelectedQuestionType(questionType);
   };
 
+  const getQuestionsForSection = (sectionId: string) => {
+    return questions.filter(q => q.sectionId === sectionId);
+  };
+
+  const getAvailableTargets = (currentQuestionId: string) => {
+    const allQuestions = questions.filter(q => q.id !== currentQuestionId);
+    return {
+      questions: allQuestions,
+      sections: sections
+    };
+  };
+
+  const renderBranchingRules = (question: Question) => {
+    if (!question.branchingRules || question.branchingRules.length === 0) {
+      return null;
+    }
+
+    return (
+      <div className="mt-4 p-4 bg-blue-50 rounded-lg border border-blue-200">
+        <div className="flex items-center justify-between mb-3">
+          <div className="flex items-center space-x-2">
+            <GitBranch className="w-4 h-4 text-blue-600" />
+            <h4 className="font-medium text-blue-900">Branching Logic</h4>
+          </div>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => addBranchingRule(question.id)}
+            className="text-blue-600 border-blue-300"
+          >
+            <Plus className="w-3 h-3 mr-1" />
+            Add Rule
+          </Button>
+        </div>
+
+        <div className="space-y-3">
+          {question.branchingRules.map((rule, index) => (
+            <div key={rule.id} className="p-3 bg-white rounded border">
+              <div className="grid grid-cols-2 gap-3 mb-3">
+                <div>
+                  <label className="text-xs font-medium text-gray-600">If response</label>
+                  <Select
+                    value={rule.condition}
+                    onValueChange={(value) => updateBranchingRule(question.id, rule.id, { condition: value as BranchingRule['condition'] })}
+                  >
+                    <SelectTrigger className="h-8">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {branchingConditions.map(condition => (
+                        <SelectItem key={condition.value} value={condition.value}>
+                          {condition.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div>
+                  <label className="text-xs font-medium text-gray-600">Value</label>
+                  <Input
+                    value={rule.value.toString()}
+                    onChange={(e) => updateBranchingRule(question.id, rule.id, { value: e.target.value })}
+                    placeholder="Enter value"
+                    className="h-8"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs font-medium text-gray-600">Then</label>
+                  <Select
+                    value={rule.action}
+                    onValueChange={(value) => updateBranchingRule(question.id, rule.id, { action: value as BranchingRule['action'] })}
+                  >
+                    <SelectTrigger className="h-8">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {branchingActions.map(action => (
+                        <SelectItem key={action.value} value={action.value}>
+                          {action.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                {(rule.action === 'show_question' || rule.action === 'skip_to') && (
+                  <div>
+                    <label className="text-xs font-medium text-gray-600">Target Question</label>
+                    <Select
+                      value={rule.targetQuestionId || ''}
+                      onValueChange={(value) => updateBranchingRule(question.id, rule.id, { targetQuestionId: value })}
+                    >
+                      <SelectTrigger className="h-8">
+                        <SelectValue placeholder="Select question" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {getAvailableTargets(question.id).questions.map(q => (
+                          <SelectItem key={q.id} value={q.id}>
+                            {q.title}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
+
+                {rule.action === 'show_section' && (
+                  <div>
+                    <label className="text-xs font-medium text-gray-600">Target Section</label>
+                    <Select
+                      value={rule.targetSectionId || ''}
+                      onValueChange={(value) => updateBranchingRule(question.id, rule.id, { targetSectionId: value })}
+                    >
+                      <SelectTrigger className="h-8">
+                        <SelectValue placeholder="Select section" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {sections.map(s => (
+                          <SelectItem key={s.id} value={s.id}>
+                            {s.title}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
+              </div>
+
+              <div className="flex justify-end mt-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => deleteBranchingRule(question.id, rule.id)}
+                  className="text-red-600 hover:bg-red-50"
+                >
+                  <Trash2 className="w-3 h-3" />
+                </Button>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  };
+
   const renderQuestionEditor = (question: Question) => {
     return (
       <Card key={question.id} className="mb-4 border-2 hover:border-blue-300 transition-colors">
@@ -100,6 +353,12 @@ const SurveyBuilder = () => {
             <div className="flex items-center space-x-2">
               <GripVertical className="w-4 h-4 text-gray-400 cursor-move" />
               <Badge variant="outline">{questionTypes.find(t => t.value === question.type)?.label}</Badge>
+              {question.branchingRules && question.branchingRules.length > 0 && (
+                <Badge variant="secondary" className="bg-blue-100 text-blue-700">
+                  <GitBranch className="w-3 h-3 mr-1" />
+                  {question.branchingRules.length} rules
+                </Badge>
+              )}
             </div>
             <div className="flex items-center space-x-2">
               <Button
@@ -109,6 +368,14 @@ const SurveyBuilder = () => {
                 className={question.required ? 'bg-red-50 border-red-200' : ''}
               >
                 {question.required ? 'Required' : 'Optional'}
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => addBranchingRule(question.id)}
+                className="text-blue-600 hover:bg-blue-50"
+              >
+                <GitBranch className="w-4 h-4" />
               </Button>
               <Button
                 variant="outline"
@@ -141,24 +408,44 @@ const SurveyBuilder = () => {
               />
             </div>
 
-            {/* Question Type Selector */}
-            <div className="flex items-center space-x-4">
-              <label className="text-sm font-medium">Question Type:</label>
-              <Select 
-                value={question.type} 
-                onValueChange={(value) => handleQuestionTypeChange(question.id, value)}
-              >
-                <SelectTrigger className="w-48">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {questionTypes.map(type => (
-                    <SelectItem key={type.value} value={type.value}>
-                      {type.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="text-sm font-medium">Question Type:</label>
+                <Select 
+                  value={question.type} 
+                  onValueChange={(value) => handleQuestionTypeChange(question.id, value)}
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {questionTypes.map(type => (
+                      <SelectItem key={type.value} value={type.value}>
+                        {type.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div>
+                <label className="text-sm font-medium">Section:</label>
+                <Select 
+                  value={question.sectionId} 
+                  onValueChange={(value) => updateQuestion(question.id, { sectionId: value })}
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {sections.map(section => (
+                      <SelectItem key={section.id} value={section.id}>
+                        {section.title}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
             </div>
 
             {/* Options for multiple choice, checkbox, dropdown */}
@@ -208,9 +495,91 @@ const SurveyBuilder = () => {
                 </div>
               </div>
             )}
+
+            {/* Branching Rules */}
+            {renderBranchingRules(question)}
           </div>
         </CardContent>
       </Card>
+    );
+  };
+
+  const renderSection = (section: Section) => {
+    const sectionQuestions = getQuestionsForSection(section.id);
+    
+    return (
+      <div key={section.id} className="mb-6">
+        <Card className="border-l-4 border-l-purple-500">
+          <Collapsible 
+            open={!section.isCollapsed}
+            onOpenChange={() => toggleSectionCollapse(section.id)}
+          >
+            <CollapsibleTrigger asChild>
+              <CardHeader className="cursor-pointer hover:bg-gray-50 transition-colors">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center space-x-3">
+                    {section.isCollapsed ? 
+                      <ChevronRight className="w-5 h-5 text-gray-500" /> : 
+                      <ChevronDown className="w-5 h-5 text-gray-500" />
+                    }
+                    <div>
+                      <CardTitle className="text-lg text-purple-700">{section.title}</CardTitle>
+                      {section.description && (
+                        <p className="text-sm text-gray-600 mt-1">{section.description}</p>
+                      )}
+                    </div>
+                  </div>
+                  <div className="flex items-center space-x-2">
+                    <Badge variant="outline">{sectionQuestions.length} questions</Badge>
+                    {section.id !== 'default' && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          deleteSection(section.id);
+                        }}
+                        className="text-red-600 hover:bg-red-50"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </Button>
+                    )}
+                  </div>
+                </div>
+              </CardHeader>
+            </CollapsibleTrigger>
+            
+            <CollapsibleContent>
+              <CardContent className="pt-0">
+                <div className="grid grid-cols-2 gap-4 mb-4">
+                  <Input
+                    placeholder="Section title"
+                    value={section.title}
+                    onChange={(e) => updateSection(section.id, { title: e.target.value })}
+                    className="font-medium"
+                  />
+                  <Input
+                    placeholder="Section description (optional)"
+                    value={section.description || ''}
+                    onChange={(e) => updateSection(section.id, { description: e.target.value })}
+                  />
+                </div>
+
+                <div className="space-y-4">
+                  {sectionQuestions.map(renderQuestionEditor)}
+                  
+                  {sectionQuestions.length === 0 && (
+                    <div className="text-center py-8 text-gray-500 border-2 border-dashed border-gray-300 rounded-lg">
+                      <p>No questions in this section</p>
+                      <p className="text-sm">Select this section from the sidebar to add questions</p>
+                    </div>
+                  )}
+                </div>
+              </CardContent>
+            </CollapsibleContent>
+          </Collapsible>
+        </Card>
+      </div>
     );
   };
 
@@ -227,7 +596,7 @@ const SurveyBuilder = () => {
               </Button>
               <div>
                 <h1 className="text-2xl font-bold text-gray-900">Survey Builder</h1>
-                <p className="text-sm text-gray-600">Create and customize your survey</p>
+                <p className="text-sm text-gray-600">Create and customize your survey with sections & branching</p>
               </div>
             </div>
             <div className="flex items-center space-x-3">
@@ -279,20 +648,26 @@ const SurveyBuilder = () => {
               </CardContent>
             </Card>
 
-            {/* Questions */}
+            {/* Sections */}
             <div className="space-y-4">
               <div className="flex items-center justify-between">
-                <h2 className="text-xl font-bold text-gray-900">Questions</h2>
-                <span className="text-sm text-gray-500">{questions.length} questions</span>
+                <h2 className="text-xl font-bold text-gray-900">Survey Sections</h2>
+                <div className="flex items-center space-x-2">
+                  <Button variant="outline" onClick={addSection}>
+                    <Plus className="w-4 h-4 mr-2" />
+                    Add Section
+                  </Button>
+                  <span className="text-sm text-gray-500">{sections.length} sections, {questions.length} questions</span>
+                </div>
               </div>
               
-              {questions.map(renderQuestionEditor)}
+              {sections.map(renderSection)}
 
-              {questions.length === 0 && (
+              {sections.length === 0 && (
                 <Card className="border-dashed border-2 border-gray-300">
                   <CardContent className="text-center py-12">
-                    <p className="text-gray-500 mb-4">No questions added yet</p>
-                    <p className="text-sm text-gray-400">Click "Add Question" to get started</p>
+                    <p className="text-gray-500 mb-4">No sections created yet</p>
+                    <p className="text-sm text-gray-400">Click "Add Section" to organize your questions</p>
                   </CardContent>
                 </Card>
               )}
@@ -306,6 +681,22 @@ const SurveyBuilder = () => {
                 <CardTitle>Add Questions</CardTitle>
               </CardHeader>
               <CardContent className="space-y-4">
+                <div>
+                  <label className="text-sm font-medium text-gray-700 mb-2 block">Target Section</label>
+                  <Select value={selectedSectionId} onValueChange={setSelectedSectionId}>
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {sections.map(section => (
+                        <SelectItem key={section.id} value={section.id}>
+                          {section.title}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
                 <div>
                   <label className="text-sm font-medium text-gray-700 mb-2 block">Question Type</label>
                   <Select value={selectedQuestionType} onValueChange={handleSelectedQuestionTypeChange}>
@@ -334,12 +725,20 @@ const SurveyBuilder = () => {
                   <h3 className="font-medium text-gray-900 mb-3">Survey Stats</h3>
                   <div className="space-y-2 text-sm">
                     <div className="flex justify-between">
+                      <span className="text-gray-600">Sections:</span>
+                      <span className="font-medium">{sections.length}</span>
+                    </div>
+                    <div className="flex justify-between">
                       <span className="text-gray-600">Questions:</span>
                       <span className="font-medium">{questions.length}</span>
                     </div>
                     <div className="flex justify-between">
                       <span className="text-gray-600">Required:</span>
                       <span className="font-medium">{questions.filter(q => q.required).length}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-gray-600">With Branching:</span>
+                      <span className="font-medium">{questions.filter(q => q.branchingRules && q.branchingRules.length > 0).length}</span>
                     </div>
                     <div className="flex justify-between">
                       <span className="text-gray-600">Estimated time:</span>
