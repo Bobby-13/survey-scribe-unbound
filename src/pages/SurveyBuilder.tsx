@@ -82,6 +82,16 @@ const SurveyBuilder = () => {
     }
   };
 
+  const handleQuestionTypeChange = (questionId: string, value: string) => {
+    const questionType = value as Question['type'];
+    updateQuestion(questionId, { type: questionType });
+  };
+
+  const handleSelectedQuestionTypeChange = (value: string) => {
+    const questionType = value as Question['type'];
+    setSelectedQuestionType(questionType);
+  };
+
   const renderQuestionEditor = (question: Question) => {
     return (
       <Card key={question.id} className="mb-4 border-2 hover:border-blue-300 transition-colors">
@@ -136,7 +146,7 @@ const SurveyBuilder = () => {
               <label className="text-sm font-medium">Question Type:</label>
               <Select 
                 value={question.type} 
-                onValueChange={(value: Question['type']) => updateQuestion(question.id, { type: value })}
+                onValueChange={(value) => handleQuestionTypeChange(question.id, value)}
               >
                 <SelectTrigger className="w-48">
                   <SelectValue />
@@ -298,7 +308,7 @@ const SurveyBuilder = () => {
               <CardContent className="space-y-4">
                 <div>
                   <label className="text-sm font-medium text-gray-700 mb-2 block">Question Type</label>
-                  <Select value={selectedQuestionType} onValueChange={setSelectedQuestionType}>
+                  <Select value={selectedQuestionType} onValueChange={handleSelectedQuestionTypeChange}>
                     <SelectTrigger>
                       <SelectValue />
                     </SelectTrigger>
