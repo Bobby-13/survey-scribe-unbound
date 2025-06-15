@@ -366,6 +366,30 @@ const SurveyBuilder = () => {
       .sort((a, b) => (a.branchingLevel || 0) - (b.branchingLevel || 0)); // Sort by branching level
   };
 
+  // New function to get main questions (not targeted by branching rules)
+  const getMainQuestionsForSection = (sectionId: string) => {
+    // Get all questions that are targeted by branching rules
+    const targetedQuestionIds = new Set<string>();
+    questions.forEach(q => {
+      if (q.branchingRules) {
+        q.branchingRules.forEach(rule => {
+          if (rule.targetQuestionId && rule.action === 'show_question') {
+            targetedQuestionIds.add(rule.targetQuestionId);
+          }
+        });
+      }
+    });
+
+    // Return only questions that are not targeted by branching rules and don't have a parent
+    return questions
+      .filter(q => 
+        q.sectionId === sectionId && 
+        !targetedQuestionIds.has(q.id) && 
+        !q.parentQuestionId
+      )
+      .sort((a, b) => (a.branchingLevel || 0) - (b.branchingLevel || 0));
+  };
+
   const getAvailableTargets = (currentQuestionId: string) => {
     const allQuestions = questions.filter(q => q.id !== currentQuestionId);
     return {
@@ -829,8 +853,8 @@ const SurveyBuilder = () => {
         </div>
 
         {sections.map(section => {
-          const sectionQuestions = getQuestionsForSection(section.id);
-          if (sectionQuestions.length === 0) return null;
+          const mainQuestions = getMainQuestionsForSection(section.id);
+          if (mainQuestions.length === 0) return null;
 
           return (
             <div key={section.id} className="border rounded-lg p-4">
@@ -840,7 +864,7 @@ const SurveyBuilder = () => {
               )}
               
               <div className="space-y-4">
-                {sectionQuestions.map(question => (
+                {mainQuestions.map(question => (
                   <div key={question.id} className={`p-4 border rounded ${question.branchingLevel ? 'ml-' + (question.branchingLevel * 4) + ' border-l-4 border-l-purple-400' : ''}`}>
                     <div className="mb-2">
                       <span className="text-sm font-medium text-gray-900">
