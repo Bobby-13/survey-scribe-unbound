@@ -387,7 +387,7 @@ const SurveyBuilder = () => {
                           setSelectedSectionId(section.id);
                           setShowQuestionDialog(true);
                         }}
-                        variant="dashed"
+                        variant="outline"
                         className="w-full border-2 border-dashed border-gray-300 hover:border-red-400 hover:bg-red-50"
                       >
                         <Plus className="w-4 h-4 mr-2" />
