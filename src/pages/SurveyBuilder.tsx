@@ -1,1115 +1,490 @@
 import React, { useState } from 'react';
-import { ArrowLeft, Plus, Trash2, GripVertical, Eye, Save, Settings, ChevronDown, ChevronRight, GitBranch } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
-import { useNavigate } from 'react-router-dom';
-
-interface BranchingRule {
-  id: string;
-  condition: 'equals' | 'not_equals' | 'greater_than' | 'less_than' | 'contains' | 'selected';
-  value: string | number;
-  targetQuestionId?: string;
-  targetSectionId?: string;
-  action: 'show_question' | 'show_section' | 'skip_to' | 'end_survey' | 'create_question';
-  newQuestionData?: Partial<Question>; // For storing new question details
-}
+import { Separator } from '@/components/ui/separator';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Switch } from '@/components/ui/switch';
+import { Label } from '@/components/ui/label';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
+import { 
+  Plus, 
+  Trash2, 
+  GripVertical, 
+  Eye, 
+  Save,
+  FileText,
+  Users,
+  Clock,
+  Settings,
+  Home,
+  BarChart3,
+  BookOpen,
+  Calendar,
+  User
+} from 'lucide-react';
 
 interface Question {
   id: string;
-  type: 'text' | 'textarea' | 'multiple_choice' | 'checkbox' | 'dropdown' | 'rating' | 'date';
-  title: string;
-  description?: string;
-  required: boolean;
-  options?: string[];
   sectionId: string;
-  branchingRules?: BranchingRule[];
-  parentQuestionId?: string; // Track which question this branched from
-  branchingLevel?: number; // Track nesting level for UI
+  question: string;
+  description?: string;
+  type: 'text' | 'textarea' | 'multiple-choice' | 'checkbox' | 'dropdown' | 'rating' | 'date';
+  options?: string[];
+  required: boolean;
+  branchingRules: BranchingRule[];
+  isBranched: boolean;
 }
 
 interface Section {
   id: string;
   title: string;
-  description?: string;
-  orderIndex: number;
-  isCollapsed?: boolean;
 }
 
-interface NewQuestionForm {
-  title: string;
-  description: string;
-  type: Question['type'];
-  required: boolean;
-  sectionId: string;
-  options: string[];
+interface BranchingRule {
+  questionId: string;
+  option: string;
+  nextSectionId: string;
 }
+
+const questionTypes = [
+  { label: 'Text', value: 'text' },
+  { label: 'Textarea', value: 'textarea' },
+  { label: 'Multiple Choice', value: 'multiple-choice' },
+  { label: 'Checkbox', value: 'checkbox' },
+  { label: 'Dropdown', value: 'dropdown' },
+  { label: 'Rating', value: 'rating' },
+  { label: 'Date', value: 'date' },
+];
 
 const SurveyBuilder = () => {
   const navigate = useNavigate();
-  const [surveyTitle, setSurveyTitle] = useState('');
+  const [surveyTitle, setSurveyTitle] = useState('Untitled Survey');
   const [surveyDescription, setSurveyDescription] = useState('');
   const [sections, setSections] = useState<Section[]>([
-    { id: 'default', title: 'General Questions', orderIndex: 0, isCollapsed: false }
+    { id: 'general', title: 'General Questions' },
   ]);
   const [questions, setQuestions] = useState<Question[]>([]);
-  const [selectedQuestionType, setSelectedQuestionType] = useState<Question['type']>('text');
-  const [selectedSectionId, setSelectedSectionId] = useState('default');
-  const [newQuestionDialogOpen, setNewQuestionDialogOpen] = useState(false);
-  const [previewDialogOpen, setPreviewDialogOpen] = useState(false);
-  const [currentBranchingContext, setCurrentBranchingContext] = useState<{
-    questionId: string;
-    ruleId: string;
-  } | null>(null);
-  const [newQuestionForm, setNewQuestionForm] = useState<NewQuestionForm>({
-    title: '',
-    description: '',
-    type: 'text',
-    required: false,
-    sectionId: 'default',
-    options: ['Option 1', 'Option 2']
-  });
-
-  const questionTypes = [
-    { value: 'text', label: 'Text Input' },
-    { value: 'textarea', label: 'Long Text' },
-    { value: 'multiple_choice', label: 'Multiple Choice' },
-    { value: 'checkbox', label: 'Checkboxes' },
-    { value: 'dropdown', label: 'Dropdown' },
-    { value: 'rating', label: 'Rating Scale' },
-    { value: 'date', label: 'Date Picker' }
-  ];
-
-  const branchingConditions = [
-    { value: 'equals', label: 'Equals' },
-    { value: 'not_equals', label: 'Not Equals' },
-    { value: 'greater_than', label: 'Greater Than' },
-    { value: 'less_than', label: 'Less Than' },
-    { value: 'contains', label: 'Contains' },
-    { value: 'selected', label: 'Option Selected' }
-  ];
-
-  const branchingActions = [
-    { value: 'show_question', label: 'Show Existing Question' },
-    { value: 'create_question', label: 'Create New Question' },
-    { value: 'show_section', label: 'Show Section' },
-    { value: 'skip_to', label: 'Skip To' },
-    { value: 'end_survey', label: 'End Survey' }
-  ];
+  const [showQuestionDialog, setShowQuestionDialog] = useState(false);
+  const [selectedQuestion, setSelectedQuestion] = useState<Question | null>(null);
+  const [selectedSectionId, setSelectedSectionId] = useState('general');
+  const [newQuestionText, setNewQuestionText] = useState('');
+  const [newQuestionType, setNewQuestionType] = useState<Question['type']>('text');
+  const [newQuestionRequired, setNewQuestionRequired] = useState(false);
+  const [newQuestionOptions, setNewQuestionOptions] = useState(['']);
+  const [showPreview, setShowPreview] = useState(false);
+  const [newQuestionDescription, setNewQuestionDescription] = useState('');
 
   const addSection = () => {
-    const newSection: Section = {
-      id: Date.now().toString(),
-      title: 'New Section',
-      orderIndex: sections.length,
-      isCollapsed: false
-    };
-    setSections([...sections, newSection]);
+    const newSectionId = Math.random().toString(36).substring(7);
+    setSections([...sections, { id: newSectionId, title: 'New Section' }]);
   };
 
-  const updateSection = (id: string, updates: Partial<Section>) => {
-    setSections(sections.map(s => s.id === id ? { ...s, ...updates } : s));
+  const deleteSection = (sectionId: string) => {
+    setSections(sections.filter(section => section.id !== sectionId));
+    setQuestions(questions.filter(question => question.sectionId !== sectionId));
   };
 
-  const deleteSection = (id: string) => {
-    if (id === 'default') return; // Don't allow deleting default section
-    
-    // Move questions from deleted section to default
-    setQuestions(questions.map(q => 
-      q.sectionId === id ? { ...q, sectionId: 'default' } : q
-    ));
-    setSections(sections.filter(s => s.id !== id));
-  };
+  const addQuestion = () => {
+    if (!newQuestionText) return;
 
-  const toggleSectionCollapse = (id: string) => {
-    setSections(sections.map(s => 
-      s.id === id ? { ...s, isCollapsed: !s.isCollapsed } : s
-    ));
-  };
-
-  const addQuestion = (branchingContext?: { questionId: string; ruleId: string }) => {
-    const parentQuestion = branchingContext ? questions.find(q => q.id === branchingContext.questionId) : null;
-    const branchingLevel = parentQuestion ? (parentQuestion.branchingLevel || 0) + 1 : 0;
-    
     const newQuestion: Question = {
-      id: Date.now().toString(),
-      type: selectedQuestionType,
-      title: branchingContext ? 'New Branched Question' : 'New Question',
-      required: false,
+      id: Math.random().toString(36).substring(7),
       sectionId: selectedSectionId,
-      options: ['multiple_choice', 'checkbox', 'dropdown'].includes(selectedQuestionType) 
-        ? ['Option 1', 'Option 2'] 
-        : undefined,
+      question: newQuestionText,
+      description: newQuestionDescription,
+      type: newQuestionType,
+      options: newQuestionType === 'multiple-choice' || newQuestionType === 'checkbox' || newQuestionType === 'dropdown' ? newQuestionOptions : [],
+      required: newQuestionRequired,
       branchingRules: [],
-      parentQuestionId: branchingContext?.questionId,
-      branchingLevel
+      isBranched: false,
     };
-    
+
     setQuestions([...questions, newQuestion]);
-
-    // If this was created from branching, update the rule
-    if (branchingContext) {
-      updateBranchingRule(
-        branchingContext.questionId, 
-        branchingContext.ruleId, 
-        { 
-          targetQuestionId: newQuestion.id,
-          newQuestionData: newQuestion
-        }
-      );
-      setNewQuestionDialogOpen(false);
-      setCurrentBranchingContext(null);
-      resetNewQuestionForm();
-    }
-
-    return newQuestion.id;
+    setShowQuestionDialog(false);
+    setNewQuestionText('');
+    setNewQuestionDescription('');
+    setNewQuestionOptions(['']);
+    setNewQuestionRequired(false);
   };
 
-  const createQuestionFromForm = () => {
-    if (!currentBranchingContext) return;
+  const editQuestion = (questionId: string) => {
+    const questionToEdit = questions.find(q => q.id === questionId);
+    if (questionToEdit) {
+      setSelectedQuestion(questionToEdit);
+      setSelectedSectionId(questionToEdit.sectionId);
+      setNewQuestionText(questionToEdit.question);
+      setNewQuestionDescription(questionToEdit.description || '');
+      setNewQuestionType(questionToEdit.type);
+      setNewQuestionOptions(questionToEdit.options || ['']);
+      setNewQuestionRequired(questionToEdit.required);
+      setShowQuestionDialog(true);
+    }
+  };
 
-    const parentQuestion = questions.find(q => q.id === currentBranchingContext.questionId);
-    const branchingLevel = parentQuestion ? (parentQuestion.branchingLevel || 0) + 1 : 0;
-    
-    const newQuestion: Question = {
-      id: Date.now().toString(),
-      type: newQuestionForm.type,
-      title: newQuestionForm.title || 'New Branched Question',
-      description: newQuestionForm.description,
-      required: newQuestionForm.required,
-      sectionId: newQuestionForm.sectionId,
-      options: ['multiple_choice', 'checkbox', 'dropdown'].includes(newQuestionForm.type) 
-        ? newQuestionForm.options.filter(opt => opt.trim() !== '')
-        : undefined,
-      branchingRules: [], // Initialize with empty branching rules
-      parentQuestionId: currentBranchingContext.questionId,
-      branchingLevel
+  const updateQuestion = () => {
+    if (!selectedQuestion) return;
+
+    const updatedQuestion: Question = {
+      ...selectedQuestion,
+      sectionId: selectedSectionId,
+      question: newQuestionText,
+      description: newQuestionDescription,
+      type: newQuestionType,
+      options: newQuestionType === 'multiple-choice' || newQuestionType === 'checkbox' || newQuestionType === 'dropdown' ? newQuestionOptions : [],
+      required: newQuestionRequired,
     };
-    
-    setQuestions([...questions, newQuestion]);
 
-    // Update the branching rule
-    updateBranchingRule(
-      currentBranchingContext.questionId, 
-      currentBranchingContext.ruleId, 
-      { 
-        targetQuestionId: newQuestion.id,
-        newQuestionData: newQuestion
-      }
-    );
-
-    setNewQuestionDialogOpen(false);
-    setCurrentBranchingContext(null);
-    resetNewQuestionForm();
-
-    console.log('Created new branched question:', newQuestion);
+    setQuestions(questions.map(q => q.id === selectedQuestion.id ? updatedQuestion : q));
+    setShowQuestionDialog(false);
+    setSelectedQuestion(null);
+    setNewQuestionText('');
+    setNewQuestionDescription('');
+    setNewQuestionOptions(['']);
+    setNewQuestionRequired(false);
   };
 
-  const resetNewQuestionForm = () => {
-    setNewQuestionForm({
-      title: '',
-      description: '',
-      type: 'text',
-      required: false,
-      sectionId: 'default',
-      options: ['Option 1', 'Option 2']
-    });
+  const deleteQuestion = (questionId: string) => {
+    setQuestions(questions.filter(question => question.id !== questionId));
   };
 
-  const updateNewQuestionForm = (updates: Partial<NewQuestionForm>) => {
-    setNewQuestionForm(prev => ({ ...prev, ...updates }));
+  const addOption = () => {
+    setNewQuestionOptions([...newQuestionOptions, '']);
   };
 
-  const addOptionToNewQuestion = () => {
-    const newOptions = [...newQuestionForm.options, `Option ${newQuestionForm.options.length + 1}`];
-    updateNewQuestionForm({ options: newOptions });
+  const updateOption = (index: number, value: string) => {
+    const updatedOptions = [...newQuestionOptions];
+    updatedOptions[index] = value;
+    setNewQuestionOptions(updatedOptions);
   };
 
-  const updateNewQuestionOption = (index: number, value: string) => {
-    const newOptions = [...newQuestionForm.options];
-    newOptions[index] = value;
-    updateNewQuestionForm({ options: newOptions });
+  const deleteOption = (index: number) => {
+    const updatedOptions = [...newQuestionOptions];
+    updatedOptions.splice(index, 1);
+    setNewQuestionOptions(updatedOptions);
   };
 
-  const removeNewQuestionOption = (index: number) => {
-    if (newQuestionForm.options.length > 1) {
-      const newOptions = newQuestionForm.options.filter((_, i) => i !== index);
-      updateNewQuestionForm({ options: newOptions });
-    }
+  const setSelectedQuestionType = (type: Question['type']) => {
+    setNewQuestionType(type);
   };
 
-  const updateQuestion = (id: string, updates: Partial<Question>) => {
-    setQuestions(questions.map(q => q.id === id ? { ...q, ...updates } : q));
-  };
-
-  const deleteQuestion = (id: string) => {
-    // Also remove any branching rules that target this question
-    const updatedQuestions = questions
-      .filter(q => q.id !== id)
-      .map(q => ({
-        ...q,
-        branchingRules: q.branchingRules?.filter(rule => rule.targetQuestionId !== id)
-      }));
-    setQuestions(updatedQuestions);
-  };
-
-  const addBranchingRule = (questionId: string) => {
-    const newRule: BranchingRule = {
-      id: Date.now().toString(),
-      condition: 'equals',
-      value: '',
-      action: 'show_question'
-    };
-    
-    const question = questions.find(q => q.id === questionId);
-    if (question) {
-      const updatedRules = [...(question.branchingRules || []), newRule];
-      updateQuestion(questionId, { branchingRules: updatedRules });
-    }
-  };
-
-  const updateBranchingRule = (questionId: string, ruleId: string, updates: Partial<BranchingRule>) => {
-    const question = questions.find(q => q.id === questionId);
-    if (question && question.branchingRules) {
-      const updatedRules = question.branchingRules.map(rule =>
-        rule.id === ruleId ? { ...rule, ...updates } : rule
-      );
-      updateQuestion(questionId, { branchingRules: updatedRules });
-    }
-  };
-
-  const deleteBranchingRule = (questionId: string, ruleId: string) => {
-    const question = questions.find(q => q.id === questionId);
-    if (question && question.branchingRules) {
-      const ruleToDelete = question.branchingRules.find(rule => rule.id === ruleId);
-      
-      // If the rule created a question, ask if they want to delete that too
-      if (ruleToDelete && ruleToDelete.targetQuestionId && ruleToDelete.action === 'create_question') {
-        const shouldDeleteTargetQuestion = window.confirm(
-          'This rule created a new question. Do you want to delete that question too?'
-        );
-        if (shouldDeleteTargetQuestion) {
-          deleteQuestion(ruleToDelete.targetQuestionId);
-        }
-      }
-
-      const updatedRules = question.branchingRules.filter(rule => rule.id !== ruleId);
-      updateQuestion(questionId, { branchingRules: updatedRules });
-    }
-  };
-
-  const handleCreateNewQuestionFromBranching = (questionId: string, ruleId: string) => {
-    setCurrentBranchingContext({ questionId, ruleId });
-    
-    // Set default section to same as parent question
-    const parentQuestion = questions.find(q => q.id === questionId);
-    if (parentQuestion) {
-      updateNewQuestionForm({ sectionId: parentQuestion.sectionId });
-    }
-    
-    setNewQuestionDialogOpen(true);
-  };
-
-  const addOption = (questionId: string) => {
-    const question = questions.find(q => q.id === questionId);
-    if (question && question.options) {
-      updateQuestion(questionId, {
-        options: [...question.options, `Option ${question.options.length + 1}`]
-      });
-    }
-  };
-
-  const updateOption = (questionId: string, optionIndex: number, value: string) => {
-    const question = questions.find(q => q.id === questionId);
-    if (question && question.options) {
-      const newOptions = [...question.options];
-      newOptions[optionIndex] = value;
-      updateQuestion(questionId, { options: newOptions });
-    }
-  };
-
-  const removeOption = (questionId: string, optionIndex: number) => {
-    const question = questions.find(q => q.id === questionId);
-    if (question && question.options && question.options.length > 1) {
-      const newOptions = question.options.filter((_, index) => index !== optionIndex);
-      updateQuestion(questionId, { options: newOptions });
-    }
-  };
-
-  const handleQuestionTypeChange = (questionId: string, value: string) => {
-    const questionType = value as Question['type'];
-    const updates: Partial<Question> = { type: questionType };
-    
-    // Add default options for option-based question types
-    if (['multiple_choice', 'checkbox', 'dropdown'].includes(questionType)) {
-      updates.options = ['Option 1', 'Option 2'];
-    } else {
-      updates.options = undefined;
-    }
-    
-    updateQuestion(questionId, updates);
-  };
-
-  const handleSelectedQuestionTypeChange = (value: string) => {
-    const questionType = value as Question['type'];
-    setSelectedQuestionType(questionType);
-  };
-
-  const getQuestionsForSection = (sectionId: string) => {
-    return questions
-      .filter(q => q.sectionId === sectionId)
-      .sort((a, b) => (a.branchingLevel || 0) - (b.branchingLevel || 0)); // Sort by branching level
-  };
-
-  // New function to get main questions (not targeted by branching rules)
-  const getMainQuestionsForSection = (sectionId: string) => {
-    // Get all questions that are targeted by branching rules
-    const targetedQuestionIds = new Set<string>();
-    questions.forEach(q => {
-      if (q.branchingRules) {
-        q.branchingRules.forEach(rule => {
-          if (rule.targetQuestionId && rule.action === 'show_question') {
-            targetedQuestionIds.add(rule.targetQuestionId);
-          }
-        });
-      }
-    });
-
-    // Return only questions that are not targeted by branching rules and don't have a parent
-    return questions
-      .filter(q => 
-        q.sectionId === sectionId && 
-        !targetedQuestionIds.has(q.id) && 
-        !q.parentQuestionId
-      )
-      .sort((a, b) => (a.branchingLevel || 0) - (b.branchingLevel || 0));
-  };
-
-  const getAvailableTargets = (currentQuestionId: string) => {
-    const allQuestions = questions.filter(q => q.id !== currentQuestionId);
-    return {
-      questions: allQuestions,
-      sections: sections
-    };
-  };
-
-  const renderBranchingRuleTargetSelector = (question: Question, rule: BranchingRule) => {
-    if (rule.action === 'create_question') {
-      return (
-        <div>
-          <label className="text-xs font-medium text-gray-600">New Question</label>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => handleCreateNewQuestionFromBranching(question.id, rule.id)}
-            className="w-full h-8 text-blue-600 border-blue-300"
-          >
-            <Plus className="w-3 h-3 mr-1" />
-            Create Question
-          </Button>
-          {rule.targetQuestionId && (
-            <div className="mt-1 text-xs text-green-600">
-              ✓ Question created: {questions.find(q => q.id === rule.targetQuestionId)?.title}
-            </div>
-          )}
-        </div>
-      );
-    }
-
-    if (rule.action === 'show_question' || rule.action === 'skip_to') {
-      return (
-        <div>
-          <label className="text-xs font-medium text-gray-600">Target Question</label>
-          <Select
-            value={rule.targetQuestionId || ''}
-            onValueChange={(value) => updateBranchingRule(question.id, rule.id, { targetQuestionId: value })}
-          >
-            <SelectTrigger className="h-8">
-              <SelectValue placeholder="Select question" />
-            </SelectTrigger>
-            <SelectContent>
-              {getAvailableTargets(question.id).questions.map(q => (
-                <SelectItem key={q.id} value={q.id}>
-                  {q.title} {q.branchingLevel ? `(Level ${q.branchingLevel})` : ''}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-      );
-    }
-
-    if (rule.action === 'show_section') {
-      return (
-        <div>
-          <label className="text-xs font-medium text-gray-600">Target Section</label>
-          <Select
-            value={rule.targetSectionId || ''}
-            onValueChange={(value) => updateBranchingRule(question.id, rule.id, { targetSectionId: value })}
-          >
-            <SelectTrigger className="h-8">
-              <SelectValue placeholder="Select section" />
-            </SelectTrigger>
-            <SelectContent>
-              {sections.map(s => (
-                <SelectItem key={s.id} value={s.id}>
-                  {s.title}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-      );
-    }
-
-    return null;
-  };
-
-  const renderBranchingRules = (question: Question) => {
-    if (!question.branchingRules || question.branchingRules.length === 0) {
-      return null;
-    }
-
-    return (
-      <div className="mt-4 p-4 bg-blue-50 rounded-lg border border-blue-200">
-        <div className="flex items-center justify-between mb-3">
-          <div className="flex items-center space-x-2">
-            <GitBranch className="w-4 h-4 text-blue-600" />
-            <h4 className="font-medium text-blue-900">Branching Logic</h4>
-            {question.branchingLevel && question.branchingLevel > 0 && (
-              <Badge variant="secondary" className="bg-purple-100 text-purple-700">
-                Level {question.branchingLevel}
-              </Badge>
-            )}
-          </div>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => addBranchingRule(question.id)}
-            className="text-blue-600 border-blue-300"
-          >
-            <Plus className="w-3 h-3 mr-1" />
-            Add Rule
-          </Button>
-        </div>
-
-        <div className="space-y-3">
-          {question.branchingRules.map((rule, index) => (
-            <div key={rule.id} className="p-3 bg-white rounded border">
-              <div className="grid grid-cols-2 gap-3 mb-3">
-                <div>
-                  <label className="text-xs font-medium text-gray-600">If response</label>
-                  <Select
-                    value={rule.condition}
-                    onValueChange={(value) => updateBranchingRule(question.id, rule.id, { condition: value as BranchingRule['condition'] })}
-                  >
-                    <SelectTrigger className="h-8">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {branchingConditions.map(condition => (
-                        <SelectItem key={condition.value} value={condition.value}>
-                          {condition.label}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                <div>
-                  <label className="text-xs font-medium text-gray-600">Value</label>
-                  {question.type === 'multiple_choice' && question.options ? (
-                    <Select
-                      value={rule.value.toString()}
-                      onValueChange={(value) => updateBranchingRule(question.id, rule.id, { value })}
-                    >
-                      <SelectTrigger className="h-8">
-                        <SelectValue placeholder="Select option" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {question.options.map((option, idx) => (
-                          <SelectItem key={idx} value={option}>
-                            {option}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  ) : (
-                    <Input
-                      value={rule.value.toString()}
-                      onChange={(e) => updateBranchingRule(question.id, rule.id, { value: e.target.value })}
-                      placeholder="Enter value"
-                      className="h-8"
-                    />
-                  )}
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="text-xs font-medium text-gray-600">Then</label>
-                  <Select
-                    value={rule.action}
-                    onValueChange={(value) => updateBranchingRule(question.id, rule.id, { action: value as BranchingRule['action'] })}
-                  >
-                    <SelectTrigger className="h-8">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {branchingActions.map(action => (
-                        <SelectItem key={action.value} value={action.value}>
-                          {action.label}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                {renderBranchingRuleTargetSelector(question, rule)}
-              </div>
-
-              <div className="flex justify-end mt-2">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => deleteBranchingRule(question.id, rule.id)}
-                  className="text-red-600 hover:bg-red-50"
-                >
-                  <Trash2 className="w-3 h-3" />
-                </Button>
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
-    );
-  };
-
-  const renderQuestionEditor = (question: Question) => {
-    const indentLevel = question.branchingLevel || 0;
-    const marginLeft = indentLevel * 20;
-
-    return (
-      <Card 
-        key={question.id} 
-        className={`mb-4 border-2 hover:border-blue-300 transition-colors ${
-          indentLevel > 0 ? 'border-l-4 border-l-purple-400' : ''
-        }`}
-        style={{ marginLeft: `${marginLeft}px` }}
-      >
-        <CardHeader className="pb-3">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center space-x-2">
-              <GripVertical className="w-4 h-4 text-gray-400 cursor-move" />
-              <Badge variant="outline">{questionTypes.find(t => t.value === question.type)?.label}</Badge>
-              {question.branchingLevel && question.branchingLevel > 0 && (
-                <Badge variant="secondary" className="bg-purple-100 text-purple-700">
-                  Branched (L{question.branchingLevel})
-                </Badge>
-              )}
-              {question.branchingRules && question.branchingRules.length > 0 && (
-                <Badge variant="secondary" className="bg-blue-100 text-blue-700">
-                  <GitBranch className="w-3 h-3 mr-1" />
-                  {question.branchingRules.length} rules
-                </Badge>
-              )}
-            </div>
-            <div className="flex items-center space-x-2">
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => updateQuestion(question.id, { required: !question.required })}
-                className={question.required ? 'bg-red-50 border-red-200' : ''}
-              >
-                {question.required ? 'Required' : 'Optional'}
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => addBranchingRule(question.id)}
-                className="text-blue-600 hover:bg-blue-50"
-              >
-                <GitBranch className="w-4 h-4" />
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => deleteQuestion(question.id)}
-                className="text-red-600 hover:bg-red-50"
-              >
-                <Trash2 className="w-4 h-4" />
-              </Button>
-            </div>
-          </div>
-        </CardHeader>
-        <CardContent>
-          <div className="space-y-4">
-            <div>
-              <Input
-                placeholder="Question title"
-                value={question.title}
-                onChange={(e) => updateQuestion(question.id, { title: e.target.value })}
-                className="text-lg font-medium"
-              />
-            </div>
-            
-            <div>
-              <Input
-                placeholder="Question description (optional)"
-                value={question.description || ''}
-                onChange={(e) => updateQuestion(question.id, { description: e.target.value })}
-                className="text-sm"
-              />
-            </div>
-
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <label className="text-sm font-medium">Question Type:</label>
-                <Select 
-                  value={question.type} 
-                  onValueChange={(value) => handleQuestionTypeChange(question.id, value)}
-                >
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {questionTypes.map(type => (
-                      <SelectItem key={type.value} value={type.value}>
-                        {type.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <div>
-                <label className="text-sm font-medium">Section:</label>
-                <Select 
-                  value={question.sectionId} 
-                  onValueChange={(value) => updateQuestion(question.id, { sectionId: value })}
-                >
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {sections.map(section => (
-                      <SelectItem key={section.id} value={section.id}>
-                        {section.title}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-
-            {/* Options for multiple choice, checkbox, dropdown */}
-            {question.options && (
-              <div className="space-y-2">
-                <div className="flex items-center justify-between">
-                  <label className="text-sm font-medium">Options:</label>
-                  <Button 
-                    variant="outline" 
-                    size="sm" 
-                    onClick={() => addOption(question.id)}
-                  >
-                    <Plus className="w-4 h-4 mr-1" />
-                    Add Option
-                  </Button>
-                </div>
-                {question.options.map((option, index) => (
-                  <div key={index} className="flex items-center space-x-2">
-                    <Input
-                      value={option}
-                      onChange={(e) => updateOption(question.id, index, e.target.value)}
-                      placeholder={`Option ${index + 1}`}
-                    />
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => removeOption(question.id, index)}
-                      disabled={question.options!.length <= 1}
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </Button>
-                  </div>
-                ))}
-              </div>
-            )}
-
-            {/* Rating scale preview */}
-            {question.type === 'rating' && (
-              <div className="p-4 bg-gray-50 rounded-lg">
-                <p className="text-sm text-gray-600 mb-2">Preview:</p>
-                <div className="flex space-x-2">
-                  {[1, 2, 3, 4, 5].map(num => (
-                    <button key={num} className="w-8 h-8 border rounded-full hover:bg-blue-100 transition-colors">
-                      {num}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {/* Branching Rules */}
-            {renderBranchingRules(question)}
-          </div>
-        </CardContent>
-      </Card>
-    );
-  };
-
-  const renderSection = (section: Section) => {
-    const sectionQuestions = getQuestionsForSection(section.id);
-    
-    return (
-      <div key={section.id} className="mb-6">
-        <Card className="border-l-4 border-l-purple-500">
-          <Collapsible 
-            open={!section.isCollapsed}
-            onOpenChange={() => toggleSectionCollapse(section.id)}
-          >
-            <CollapsibleTrigger asChild>
-              <CardHeader className="cursor-pointer hover:bg-gray-50 transition-colors">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center space-x-3">
-                    {section.isCollapsed ? 
-                      <ChevronRight className="w-5 h-5 text-gray-500" /> : 
-                      <ChevronDown className="w-5 h-5 text-gray-500" />
-                    }
-                    <div>
-                      <CardTitle className="text-lg text-purple-700">{section.title}</CardTitle>
-                      {section.description && (
-                        <p className="text-sm text-gray-600 mt-1">{section.description}</p>
-                      )}
-                    </div>
-                  </div>
-                  <div className="flex items-center space-x-2">
-                    <Badge variant="outline">{sectionQuestions.length} questions</Badge>
-                    {section.id !== 'default' && (
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          deleteSection(section.id);
-                        }}
-                        className="text-red-600 hover:bg-red-50"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </Button>
-                    )}
-                  </div>
-                </div>
-              </CardHeader>
-            </CollapsibleTrigger>
-            
-            <CollapsibleContent>
-              <CardContent className="pt-0">
-                <div className="grid grid-cols-2 gap-4 mb-4">
-                  <Input
-                    placeholder="Section title"
-                    value={section.title}
-                    onChange={(e) => updateSection(section.id, { title: e.target.value })}
-                    className="font-medium"
-                  />
-                  <Input
-                    placeholder="Section description (optional)"
-                    value={section.description || ''}
-                    onChange={(e) => updateSection(section.id, { description: e.target.value })}
-                  />
-                </div>
-
-                <div className="space-y-4">
-                  {sectionQuestions.map(renderQuestionEditor)}
-                  
-                  {sectionQuestions.length === 0 && (
-                    <div className="text-center py-8 text-gray-500 border-2 border-dashed border-gray-300 rounded-lg">
-                      <p className="text-gray-500 mb-4">No questions in this section</p>
-                      <p className="text-sm text-gray-400">Click "Add Question" to organize your questions</p>
-                    </div>
-                  )}
-                </div>
-              </CardContent>
-            </CollapsibleContent>
-          </Collapsible>
-        </Card>
-      </div>
-    );
-  };
-
-  const renderSurveyPreview = () => {
-    return (
-      <div className="space-y-6">
-        <div className="text-center">
-          <h2 className="text-2xl font-bold text-gray-900">{surveyTitle || 'Untitled Survey'}</h2>
-          {surveyDescription && (
-            <p className="text-gray-600 mt-2">{surveyDescription}</p>
-          )}
-        </div>
-
-        {sections.map(section => {
-          const mainQuestions = getMainQuestionsForSection(section.id);
-          if (mainQuestions.length === 0) return null;
-
-          return (
-            <div key={section.id} className="border rounded-lg p-4">
-              <h3 className="text-lg font-semibold text-purple-700 mb-4">{section.title}</h3>
-              {section.description && (
-                <p className="text-gray-600 mb-4">{section.description}</p>
-              )}
-              
-              <div className="space-y-4">
-                {mainQuestions.map(question => (
-                  <div key={question.id} className={`p-4 border rounded ${question.branchingLevel ? 'ml-' + (question.branchingLevel * 4) + ' border-l-4 border-l-purple-400' : ''}`}>
-                    <div className="mb-2">
-                      <span className="text-sm font-medium text-gray-900">
-                        {question.title} {question.required && <span className="text-red-500">*</span>}
-                      </span>
-                      {question.description && (
-                        <p className="text-sm text-gray-600 mt-1">{question.description}</p>
-                      )}
-                    </div>
-                    
-                    {question.type === 'text' && (
-                      <input type="text" className="w-full p-2 border rounded" placeholder="Your answer..." disabled />
-                    )}
-                    
-                    {question.type === 'textarea' && (
-                      <textarea className="w-full p-2 border rounded" rows={3} placeholder="Your answer..." disabled />
-                    )}
-                    
-                    {question.type === 'multiple_choice' && question.options && (
-                      <div className="space-y-2">
-                        {question.options.map((option, idx) => (
-                          <label key={idx} className="flex items-center space-x-2">
-                            <input type="radio" name={question.id} disabled />
-                            <span>{option}</span>
-                          </label>
-                        ))}
-                      </div>
-                    )}
-                    
-                    {question.type === 'checkbox' && question.options && (
-                      <div className="space-y-2">
-                        {question.options.map((option, idx) => (
-                          <label key={idx} className="flex items-center space-x-2">
-                            <input type="checkbox" disabled />
-                            <span>{option}</span>
-                          </label>
-                        ))}
-                      </div>
-                    )}
-                    
-                    {question.type === 'dropdown' && question.options && (
-                      <select className="w-full p-2 border rounded" disabled>
-                        <option>Select an option...</option>
-                        {question.options.map((option, idx) => (
-                          <option key={idx}>{option}</option>
-                        ))}
-                      </select>
-                    )}
-                    
-                    {question.type === 'rating' && (
-                      <div className="flex space-x-2">
-                        {[1, 2, 3, 4, 5].map(num => (
-                          <button key={num} className="w-8 h-8 border rounded-full hover:bg-blue-100 transition-colors" disabled>
-                            {num}
-                          </button>
-                        ))}
-                      </div>
-                    )}
-                    
-                    {question.type === 'date' && (
-                      <input type="date" className="p-2 border rounded" disabled />
-                    )}
-
-                    {question.branchingRules && question.branchingRules.length > 0 && (
-                      <div className="mt-2 text-xs text-blue-600">
-                        <GitBranch className="w-3 h-3 inline mr-1" />
-                        Has branching logic ({question.branchingRules.length} rules)
-                      </div>
-                    )}
-                  </div>
-                ))}
-              </div>
-            </div>
-          );
-        })}
-      </div>
-    );
+  const saveSurvey = () => {
+    // Placeholder for save functionality
+    alert('Survey saved!');
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-purple-50">
-      {/* Header */}
-      <header className="bg-white/80 backdrop-blur-md border-b border-gray-200 sticky top-0 z-50">
-        <div className="container mx-auto px-6 py-4">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center space-x-4">
-              <Button variant="outline" onClick={() => navigate('/')}>
-                <ArrowLeft className="w-4 h-4 mr-2" />
-                Back
-              </Button>
-              <div>
-                <h1 className="text-2xl font-bold text-gray-900">Survey Builder</h1>
-                <p className="text-sm text-gray-600">Create and customize your survey with sections & branching</p>
+    <div className="min-h-screen bg-gray-50 flex">
+      {/* Sidebar Navigation */}
+      <div className="w-64 bg-red-600 text-white flex flex-col">
+        <div className="p-4 border-b border-red-500">
+          <div className="flex items-center space-x-2">
+            <div className="w-8 h-8 bg-white rounded flex items-center justify-center">
+              <span className="text-red-600 font-bold text-sm">G</span>
+            </div>
+            <span className="font-semibold">Survey Builder</span>
+          </div>
+        </div>
+        
+        <nav className="flex-1 p-4">
+          <div className="space-y-2">
+            <button
+              onClick={() => navigate('/')}
+              className="w-full flex items-center space-x-3 px-3 py-2 rounded hover:bg-red-500 transition-colors"
+            >
+              <Home className="w-4 h-4" />
+              <span>Home</span>
+            </button>
+            
+            <button
+              onClick={() => navigate('/surveys')}
+              className="w-full flex items-center space-x-3 px-3 py-2 rounded hover:bg-red-500 transition-colors"
+            >
+              <FileText className="w-4 h-4" />
+              <span>Surveys</span>
+            </button>
+            
+            <button
+              onClick={() => navigate('/analytics')}
+              className="w-full flex items-center space-x-3 px-3 py-2 rounded hover:bg-red-500 transition-colors"
+            >
+              <BarChart3 className="w-4 h-4" />
+              <span>Analytics</span>
+            </button>
+            
+            <div className="bg-red-700 rounded px-3 py-2">
+              <div className="flex items-center space-x-3">
+                <BookOpen className="w-4 h-4" />
+                <span>Survey Builder</span>
               </div>
             </div>
-            <div className="flex items-center space-x-3">
-              <Button variant="outline" onClick={() => setPreviewDialogOpen(true)}>
-                <Eye className="w-4 h-4 mr-2" />
-                Preview
-              </Button>
-              <Button variant="outline">
-                <Settings className="w-4 h-4 mr-2" />
-                Settings
-              </Button>
-              <Button className="bg-gradient-to-r from-blue-600 to-purple-600 text-white">
-                <Save className="w-4 h-4 mr-2" />
-                Save Survey
-              </Button>
+          </div>
+        </nav>
+        
+        <div className="p-4 border-t border-red-500">
+          <div className="flex items-center space-x-2">
+            <User className="w-6 h-6" />
+            <div>
+              <div className="text-sm font-medium">Survey Creator</div>
+              <div className="text-xs text-red-200">Survey Manager</div>
             </div>
           </div>
         </div>
-      </header>
+      </div>
 
-      <div className="container mx-auto px-6 py-8">
-        <div className="grid grid-cols-1 lg:grid-cols-4 gap-8">
-          {/* Main Editor */}
-          <div className="lg:col-span-3">
-            {/* Survey Header */}
+      {/* Main Content */}
+      <div className="flex-1 flex flex-col">
+        {/* Header */}
+        <header className="bg-white border-b border-gray-200 px-6 py-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <h1 className="text-2xl font-semibold text-gray-900">Survey Builder</h1>
+              <div className="flex items-center space-x-2 text-sm text-gray-500 mt-1">
+                <Home className="w-4 h-4" />
+                <span>Master Data</span>
+                <span>/</span>
+                <span className="text-red-600">Survey Builder</span>
+              </div>
+            </div>
+            <div className="flex items-center space-x-3">
+              <Button
+                onClick={() => setShowPreview(true)}
+                variant="outline"
+                className="border-gray-300"
+              >
+                <Eye className="w-4 h-4 mr-2" />
+                Preview
+              </Button>
+              <Button 
+                onClick={saveSurvey}
+                className="bg-red-600 hover:bg-red-700"
+              >
+                <Save className="w-4 h-4 mr-2" />
+                Save
+              </Button>
+            </div>
+          </div>
+        </header>
+
+        <div className="flex-1 flex">
+          {/* Main Survey Builder */}
+          <div className="flex-1 p-6">
+            {/* Survey Info Card */}
             <Card className="mb-6">
               <CardHeader>
-                <CardTitle>Survey Information</CardTitle>
+                <CardTitle className="text-lg">Survey Information</CardTitle>
               </CardHeader>
               <CardContent className="space-y-4">
                 <div>
-                  <label className="text-sm font-medium text-gray-700 mb-2 block">Survey Title</label>
+                  <Label htmlFor="title">Survey Title</Label>
                   <Input
-                    placeholder="Enter survey title"
+                    id="title"
                     value={surveyTitle}
                     onChange={(e) => setSurveyTitle(e.target.value)}
-                    className="text-xl font-semibold"
+                    placeholder="Enter survey title"
+                    className="mt-1"
                   />
                 </div>
                 <div>
-                  <label className="text-sm font-medium text-gray-700 mb-2 block">Survey Description</label>
+                  <Label htmlFor="description">Description</Label>
                   <Textarea
-                    placeholder="Describe the purpose of your survey"
+                    id="description"
                     value={surveyDescription}
                     onChange={(e) => setSurveyDescription(e.target.value)}
-                    rows={3}
+                    placeholder="Enter survey description"
+                    className="mt-1"
                   />
                 </div>
               </CardContent>
             </Card>
 
             {/* Sections */}
-            <div className="space-y-4">
-              <div className="flex items-center justify-between">
-                <h2 className="text-xl font-bold text-gray-900">Survey Sections</h2>
-                <div className="flex items-center space-x-2">
-                  <Button variant="outline" onClick={addSection}>
-                    <Plus className="w-4 h-4 mr-2" />
-                    Add Section
-                  </Button>
-                  <span className="text-sm text-gray-500">{sections.length} sections, {questions.length} questions</span>
-                </div>
-              </div>
-              
-              {sections.map(renderSection)}
-
-              {sections.length === 0 && (
-                <Card className="border-dashed border-2 border-gray-300">
-                  <CardContent className="text-center py-12">
-                    <p className="text-gray-500 mb-4">No sections created yet</p>
-                    <p className="text-sm text-gray-400">Click "Add Section" to organize your questions</p>
+            <div className="space-y-6">
+              {sections.map((section) => (
+                <Card key={section.id} className="border-gray-200">
+                  <CardHeader className="bg-gray-50 border-b">
+                    <div className="flex items-center justify-between">
+                      <CardTitle className="text-lg">{section.title}</CardTitle>
+                      <div className="flex items-center space-x-2">
+                        <Badge variant="secondary" className="bg-red-100 text-red-800">
+                          {questions.filter(q => q.sectionId === section.id && !q.isBranched).length} Questions
+                        </Badge>
+                        {section.id !== 'general' && (
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            onClick={() => deleteSection(section.id)}
+                            className="text-red-600 hover:text-red-700 hover:bg-red-50"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </Button>
+                        )}
+                      </div>
+                    </div>
+                  </CardHeader>
+                  <CardContent className="p-6">
+                    <div className="space-y-4">
+                      {questions
+                        .filter(q => q.sectionId === section.id && !q.isBranched)
+                        .map((question, index) => (
+                          <div key={question.id} className="border rounded-lg p-4 bg-white">
+                            <div className="flex items-start justify-between">
+                              <div className="flex items-start space-x-3 flex-1">
+                                <GripVertical className="w-5 h-5 text-gray-400 mt-1 cursor-move" />
+                                <div className="flex-1">
+                                  <div className="flex items-center space-x-2 mb-2">
+                                    <span className="font-medium">Question {index + 1}</span>
+                                    <Badge variant="outline">{question.type}</Badge>
+                                    {question.required && (
+                                      <Badge className="bg-red-100 text-red-800">Required</Badge>
+                                    )}
+                                    {question.branchingRules.length > 0 && (
+                                      <Badge className="bg-blue-100 text-blue-800">Has Branching</Badge>
+                                    )}
+                                  </div>
+                                  <p className="text-gray-700 mb-2">{question.question}</p>
+                                  {question.description && (
+                                    <p className="text-sm text-gray-500 mb-2">{question.description}</p>
+                                  )}
+                                  {(question.type === 'multiple-choice' || question.type === 'checkbox' || question.type === 'dropdown') && (
+                                    <div className="flex flex-wrap gap-1">
+                                      {question.options?.map((option, idx) => (
+                                        <Badge key={idx} variant="secondary" className="text-xs">
+                                          {option}
+                                        </Badge>
+                                      ))}
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+                              <div className="flex items-center space-x-2">
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
+                                  onClick={() => editQuestion(question.id)}
+                                  className="text-blue-600 hover:text-blue-700 hover:bg-blue-50"
+                                >
+                                  <Settings className="w-4 h-4" />
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
+                                  onClick={() => deleteQuestion(question.id)}
+                                  className="text-red-600 hover:text-red-700 hover:bg-red-50"
+                                >
+                                  <Trash2 className="w-4 h-4" />
+                                </Button>
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      
+                      <Button
+                        onClick={() => {
+                          setSelectedSectionId(section.id);
+                          setShowQuestionDialog(true);
+                        }}
+                        variant="dashed"
+                        className="w-full border-2 border-dashed border-gray-300 hover:border-red-400 hover:bg-red-50"
+                      >
+                        <Plus className="w-4 h-4 mr-2" />
+                        Add Question
+                      </Button>
+                    </div>
                   </CardContent>
                 </Card>
-              )}
+              ))}
+              
+              <Button
+                onClick={addSection}
+                variant="outline"
+                className="w-full border-2 border-dashed border-gray-300 hover:border-red-400 hover:bg-red-50"
+              >
+                <Plus className="w-4 h-4 mr-2" />
+                Add Section
+              </Button>
             </div>
           </div>
 
-          {/* Sidebar */}
-          <div className="lg:col-span-1">
-            <Card className="sticky top-24">
+          {/* Right Sidebar - Survey Stats */}
+          <div className="w-80 bg-white border-l border-gray-200 p-6">
+            <Card>
               <CardHeader>
-                <CardTitle>Add Questions</CardTitle>
+                <CardTitle className="text-lg">Survey Statistics</CardTitle>
               </CardHeader>
               <CardContent className="space-y-4">
-                <div>
-                  <label className="text-sm font-medium text-gray-700 mb-2 block">Target Section</label>
-                  <Select value={selectedSectionId} onValueChange={setSelectedSectionId}>
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {sections.map(section => (
-                        <SelectItem key={section.id} value={section.id}>
-                          {section.title}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                <div>
-                  <label className="text-sm font-medium text-gray-700 mb-2 block">Question Type</label>
-                  <Select value={selectedQuestionType} onValueChange={handleSelectedQuestionTypeChange}>
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {questionTypes.map(type => (
-                        <SelectItem key={type.value} value={type.value}>
-                          {type.label}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="text-center p-3 bg-blue-50 rounded-lg">
+                    <div className="text-2xl font-bold text-blue-600">{sections.length}</div>
+                    <div className="text-sm text-gray-600">Sections</div>
+                  </div>
+                  <div className="text-center p-3 bg-green-50 rounded-lg">
+                    <div className="text-2xl font-bold text-green-600">{questions.length}</div>
+                    <div className="text-sm text-gray-600">Questions</div>
+                  </div>
+                  <div className="text-center p-3 bg-orange-50 rounded-lg">
+                    <div className="text-2xl font-bold text-orange-600">
+                      {questions.filter(q => q.required).length}
+                    </div>
+                    <div className="text-sm text-gray-600">Required</div>
+                  </div>
+                  <div className="text-center p-3 bg-purple-50 rounded-lg">
+                    <div className="text-2xl font-bold text-purple-600">
+                      {questions.filter(q => q.branchingRules.length > 0).length}
+                    </div>
+                    <div className="text-sm text-gray-600">Branching</div>
+                  </div>
                 </div>
                 
-                <Button 
-                  onClick={() => addQuestion()} 
-                  className="w-full bg-gradient-to-r from-blue-600 to-purple-600 text-white"
-                >
-                  <Plus className="w-4 h-4 mr-2" />
-                  Add Question
-                </Button>
-
-                <div className="pt-4 border-t">
-                  <h3 className="font-medium text-gray-900 mb-3">Survey Stats</h3>
-                  <div className="space-y-2 text-sm">
-                    <div className="flex justify-between">
-                      <span className="text-gray-600">Sections:</span>
-                      <span className="font-medium">{sections.length}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-gray-600">Questions:</span>
-                      <span className="font-medium">{questions.length}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-gray-600">Required:</span>
-                      <span className="font-medium">{questions.filter(q => q.required).length}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-gray-600">With Branching:</span>
-                      <span className="font-medium">{questions.filter(q => q.branchingRules && q.branchingRules.length > 0).length}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-gray-600">Branched Questions:</span>
-                      <span className="font-medium">{questions.filter(q => q.parentQuestionId).length}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-gray-600">Estimated time:</span>
-                      <span className="font-medium">{Math.max(1, Math.ceil(questions.length * 0.5))} min</span>
-                    </div>
+                <Separator />
+                
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="text-gray-600">Estimated Time:</span>
+                    <span className="font-medium">{Math.ceil(questions.length * 0.5)} min</span>
                   </div>
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="text-gray-600">Branched Questions:</span>
+                    <span className="font-medium">{questions.filter(q => q.isBranched).length}</span>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* Quick Add Question Types */}
+            <Card className="mt-6">
+              <CardHeader>
+                <CardTitle className="text-lg">Quick Add Questions</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="grid grid-cols-2 gap-2">
+                  {[
+                    { type: 'text', label: 'Text', icon: FileText },
+                    { type: 'textarea', label: 'Long Text', icon: FileText },
+                    { type: 'multiple-choice', label: 'Choice', icon: FileText },
+                    { type: 'checkbox', label: 'Checkbox', icon: FileText },
+                    { type: 'dropdown', label: 'Dropdown', icon: FileText },
+                    { type: 'rating', label: 'Rating', icon: FileText },
+                    { type: 'date', label: 'Date', icon: Calendar },
+                  ].map((questionType) => (
+                    <Button
+                      key={questionType.type}
+                      size="sm"
+                      variant="outline"
+                      onClick={() => {
+                        setSelectedQuestionType(questionType.type as any);
+                        setSelectedSectionId('general');
+                        setShowQuestionDialog(true);
+                      }}
+                      className="text-xs hover:bg-red-50 hover:border-red-300"
+                    >
+                      <questionType.icon className="w-3 h-3 mr-1" />
+                      {questionType.label}
+                    </Button>
+                  ))}
                 </div>
               </CardContent>
             </Card>
@@ -1117,177 +492,136 @@ const SurveyBuilder = () => {
         </div>
       </div>
 
-      {/* Survey Preview Dialog */}
-      <Dialog open={previewDialogOpen} onOpenChange={setPreviewDialogOpen}>
-        <DialogContent className="max-w-4xl max-h-[80vh] overflow-y-auto">
+      {/* Question Dialog */}
+      <Dialog open={showQuestionDialog} onOpenChange={setShowQuestionDialog}>
+        <DialogContent>
           <DialogHeader>
-            <DialogTitle>Survey Preview</DialogTitle>
-            <DialogDescription>
-              This is how your survey will appear to respondents.
-            </DialogDescription>
+            <DialogTitle>{selectedQuestion ? 'Edit Question' : 'Add Question'}</DialogTitle>
           </DialogHeader>
-          <div className="mt-4">
-            {renderSurveyPreview()}
+          <div className="grid gap-4 py-4">
+            <div>
+              <Label htmlFor="question">Question Text</Label>
+              <Input
+                id="question"
+                value={newQuestionText}
+                onChange={(e) => setNewQuestionText(e.target.value)}
+              />
+            </div>
+            <div>
+              <Label htmlFor="description">Description</Label>
+              <Textarea
+                id="description"
+                value={newQuestionDescription}
+                onChange={(e) => setNewQuestionDescription(e.target.value)}
+                placeholder="Optional: Add a more detailed explanation"
+                className="mt-1"
+              />
+            </div>
+            <div>
+              <Label htmlFor="type">Question Type</Label>
+              <Select value={newQuestionType} onValueChange={(value) => setNewQuestionType(value as Question['type'])}>
+                <SelectTrigger className="w-full">
+                  <SelectValue placeholder="Select a type" />
+                </SelectTrigger>
+                <SelectContent>
+                  {questionTypes.map((type) => (
+                    <SelectItem key={type.value} value={type.value}>
+                      {type.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            {(newQuestionType === 'multiple-choice' || newQuestionType === 'checkbox' || newQuestionType === 'dropdown') && (
+              <div>
+                <Label>Options</Label>
+                <div className="space-y-2">
+                  {newQuestionOptions.map((option, index) => (
+                    <div key={index} className="flex items-center space-x-2">
+                      <Input
+                        type="text"
+                        value={option}
+                        onChange={(e) => updateOption(index, e.target.value)}
+                        placeholder={`Option ${index + 1}`}
+                      />
+                      <Button type="button" variant="ghost" size="sm" onClick={() => deleteOption(index)}>
+                        <Trash2 className="w-4 h-4" />
+                      </Button>
+                    </div>
+                  ))}
+                  <Button type="button" variant="outline" size="sm" onClick={addOption}>
+                    Add Option
+                  </Button>
+                </div>
+              </div>
+            )}
+
+            <div className="flex items-center space-x-2">
+              <Label htmlFor="required">Required</Label>
+              <Switch
+                id="required"
+                checked={newQuestionRequired}
+                onCheckedChange={(checked) => setNewQuestionRequired(checked)}
+              />
+            </div>
+          </div>
+          <div className="flex justify-end space-x-2">
+            <Button type="button" variant="secondary" onClick={() => setShowQuestionDialog(false)}>
+              Cancel
+            </Button>
+            <Button type="button" onClick={selectedQuestion ? updateQuestion : addQuestion}>
+              {selectedQuestion ? 'Update Question' : 'Add Question'}
+            </Button>
           </div>
         </DialogContent>
       </Dialog>
 
-      {/* Enhanced New Question Dialog for Branching */}
-      <Dialog open={newQuestionDialogOpen} onOpenChange={setNewQuestionDialogOpen}>
-        <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
+      {/* Preview Dialog */}
+      <Dialog open={showPreview} onOpenChange={setShowPreview}>
+        <DialogContent className="max-w-3xl">
           <DialogHeader>
-            <DialogTitle>Create New Branched Question</DialogTitle>
-            <DialogDescription>
-              Create a new question that will be shown based on the branching condition.
-            </DialogDescription>
+            <DialogTitle>Survey Preview</DialogTitle>
           </DialogHeader>
-          <div className="space-y-4">
-            <div>
-              <label className="text-sm font-medium text-gray-700 mb-2 block">Question Title *</label>
-              <Input
-                value={newQuestionForm.title}
-                onChange={(e) => updateNewQuestionForm({ title: e.target.value })}
-                placeholder="Enter question title"
-              />
-            </div>
-
-            <div>
-              <label className="text-sm font-medium text-gray-700 mb-2 block">Question Description</label>
-              <Textarea
-                value={newQuestionForm.description}
-                onChange={(e) => updateNewQuestionForm({ description: e.target.value })}
-                placeholder="Optional description for the question"
-                rows={2}
-              />
-            </div>
-
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <label className="text-sm font-medium text-gray-700 mb-2 block">Question Type</label>
-                <Select 
-                  value={newQuestionForm.type} 
-                  onValueChange={(value: Question['type']) => {
-                    const updates: Partial<NewQuestionForm> = { type: value };
-                    if (['multiple_choice', 'checkbox', 'dropdown'].includes(value)) {
-                      updates.options = ['Option 1', 'Option 2'];
-                    }
-                    updateNewQuestionForm(updates);
-                  }}
-                >
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {questionTypes.map(type => (
-                      <SelectItem key={type.value} value={type.value}>
-                        {type.label}
-                      </SelectItem>
+          <div>
+            <h2 className="text-2xl font-bold mb-4">{surveyTitle}</h2>
+            <p className="text-gray-600 mb-6">{surveyDescription}</p>
+            {sections.map((section) => (
+              <div key={section.id} className="mb-8">
+                <h3 className="text-xl font-semibold mb-3">{section.title}</h3>
+                {questions.filter(q => q.sectionId === section.id).map((question) => (
+                  <div key={question.id} className="mb-4">
+                    <p className="font-medium">{question.question}</p>
+                    {question.type === 'text' && <Input placeholder="Your answer" />}
+                    {question.type === 'textarea' && <Textarea placeholder="Your answer" />}
+                    {question.type === 'multiple-choice' && question.options?.map((option) => (
+                      <div key={option} className="flex items-center space-x-2">
+                        <input type="radio" id={option} name={question.id} value={option} />
+                        <label htmlFor={option}>{option}</label>
+                      </div>
                     ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              
-              <div>
-                <label className="text-sm font-medium text-gray-700 mb-2 block">Section</label>
-                <Select 
-                  value={newQuestionForm.sectionId} 
-                  onValueChange={(value) => updateNewQuestionForm({ sectionId: value })}
-                >
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {sections.map(section => (
-                      <SelectItem key={section.id} value={section.id}>
-                        {section.title}
-                      </SelectItem>
+                    {question.type === 'checkbox' && question.options?.map((option) => (
+                      <div key={option} className="flex items-center space-x-2">
+                        <input type="checkbox" id={option} name={question.id} value={option} />
+                        <label htmlFor={option}>{option}</label>
+                      </div>
                     ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-
-            <div className="flex items-center space-x-2">
-              <input
-                type="checkbox"
-                id="required"
-                checked={newQuestionForm.required}
-                onChange={(e) => updateNewQuestionForm({ required: e.target.checked })}
-                className="rounded"
-              />
-              <label htmlFor="required" className="text-sm font-medium text-gray-700">
-                Required question
-              </label>
-            </div>
-
-            {/* Options for multiple choice, checkbox, dropdown */}
-            {['multiple_choice', 'checkbox', 'dropdown'].includes(newQuestionForm.type) && (
-              <div className="space-y-2">
-                <div className="flex items-center justify-between">
-                  <label className="text-sm font-medium text-gray-700">Answer Options:</label>
-                  <Button 
-                    variant="outline" 
-                    size="sm" 
-                    onClick={addOptionToNewQuestion}
-                  >
-                    <Plus className="w-4 h-4 mr-1" />
-                    Add Option
-                  </Button>
-                </div>
-                {newQuestionForm.options.map((option, index) => (
-                  <div key={index} className="flex items-center space-x-2">
-                    <Input
-                      value={option}
-                      onChange={(e) => updateNewQuestionOption(index, e.target.value)}
-                      placeholder={`Option ${index + 1}`}
-                    />
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => removeNewQuestionOption(index)}
-                      disabled={newQuestionForm.options.length <= 1}
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </Button>
+                    {question.type === 'dropdown' && (
+                      <Select>
+                        <SelectTrigger className="w-full">
+                          <SelectValue placeholder="Select an option" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {question.options?.map((option) => (
+                            <SelectItem key={option} value={option}>{option}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    )}
                   </div>
                 ))}
               </div>
-            )}
-
-            {/* Rating scale preview */}
-            {newQuestionForm.type === 'rating' && (
-              <div className="p-4 bg-gray-50 rounded-lg">
-                <label className="text-sm font-medium text-gray-700 mb-2 block">Preview:</label>
-                <div className="flex space-x-2">
-                  {[1, 2, 3, 4, 5].map(num => (
-                    <button key={num} className="w-8 h-8 border rounded-full hover:bg-blue-100 transition-colors" disabled>
-                      {num}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            <div className="flex justify-end space-x-2 pt-4">
-              <Button 
-                variant="outline" 
-                onClick={() => {
-                  setNewQuestionDialogOpen(false);
-                  setCurrentBranchingContext(null);
-                  resetNewQuestionForm();
-                }}
-              >
-                Cancel
-              </Button>
-              <Button 
-                onClick={createQuestionFromForm}
-                disabled={!newQuestionForm.title.trim()}
-                className="bg-gradient-to-r from-blue-600 to-purple-600 text-white"
-              >
-                <Plus className="w-4 h-4 mr-2" />
-                Create Question
-              </Button>
-            </div>
+            ))}
           </div>
         </DialogContent>
       </Dialog>
